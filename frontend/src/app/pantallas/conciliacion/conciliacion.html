@@ -1,0 +1,183 @@
+<!-- Barra Superior Blanca -->
+<div class="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center">
+  <h2 class="text-xl text-gray-700 font-normal">Conciliación Bancaria Automática</h2>
+  <a href="#" class="text-sm text-[#004e82] hover:underline">Ver ayuda</a>
+</div>
+
+<!-- Contenedor Principal Gris -->
+<div class="bg-[#f4f6f8] min-h-screen p-6 relative">
+  
+  <!-- Overlay de Carga de FastAPI -->
+  <div *ngIf="cargando" class="absolute inset-0 bg-white/80 z-50 flex flex-col items-center justify-center">
+    <i class="pi pi-spin pi-spinner text-[#004e82] text-6xl mb-4"></i>
+    <p class="text-gray-700 font-semibold text-lg">Procesando datos con FastAPI...</p>
+  </div>
+
+  <!-- 1. Tarjeta de Filtros -->
+  <div class="bg-white border border-gray-200 rounded p-4 mb-6 shadow-sm">
+    <div class="flex justify-between items-center mb-4">
+      <span class="text-sm text-gray-700">Filtros</span>
+      <i class="pi pi-chevron-up text-gray-500 text-xs cursor-pointer"></i>
+    </div>
+    
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 items-end">
+      
+      <!-- Fila 1, Columna 1: Cuenta contable -->
+      <div class="flex flex-col relative">
+        <label class="text-[11px] text-gray-500 absolute -top-2 left-2 bg-white px-1">Cuenta contable<span class="text-red-500">*</span></label>
+        <select class="border border-gray-300 rounded p-2 text-sm text-gray-700 h-10 appearance-none bg-transparent focus:outline-none focus:border-blue-400">
+          <option></option>
+        </select>
+        <i class="pi pi-chevron-down absolute right-3 top-3.5 text-xs text-gray-400 pointer-events-none"></i>
+      </div>
+      
+      <!-- Fila 1, Columna 2: Cuenta bancaria -->
+      <div class="flex flex-col relative">
+        <label class="text-[11px] text-gray-400 absolute -top-2 left-2 bg-white px-1">Cuenta bancaria</label>
+        <select class="border border-gray-200 rounded p-2 text-sm text-gray-400 h-10 appearance-none bg-transparent" disabled>
+          <option></option>
+        </select>
+        <i class="pi pi-chevron-down absolute right-3 top-3.5 text-xs text-gray-300 pointer-events-none"></i>
+      </div>
+
+      <!-- Fila 2, Columna 1: Fechas agrupadas -->
+      <div class="flex gap-4">
+        <div class="flex flex-col relative w-1/2">
+          <label class="text-[11px] text-gray-500 absolute -top-2 left-2 bg-white px-1">Fecha desde<span class="text-red-500">*</span></label>
+          <input type="date" value="2026-09-30" class="border border-gray-300 rounded p-2 text-sm text-gray-700 h-10 focus:outline-none focus:border-blue-400">
+        </div>
+        <div class="flex flex-col relative w-1/2">
+          <label class="text-[11px] text-gray-500 absolute -top-2 left-2 bg-white px-1">Fecha hasta<span class="text-red-500">*</span></label>
+          <input type="date" value="2026-09-30" class="border border-gray-300 rounded p-2 text-sm text-gray-700 h-10 focus:outline-none focus:border-blue-400">
+        </div>
+      </div>
+
+      <!-- Fila 2, Columna 2: Circuito contable -->
+      <div class="flex flex-col relative">
+        <label class="text-[11px] text-gray-500 absolute -top-2 left-2 bg-white px-1">Circuito contable<span class="text-red-500">*</span></label>
+        <input type="text" value="default" class="border border-gray-300 rounded p-2 text-sm text-gray-700 h-10 focus:outline-none focus:border-blue-400">
+        <i class="pi pi-times absolute right-3 top-3.5 text-sm text-gray-600 cursor-pointer hover:text-red-500"></i>
+      </div>
+
+    </div>
+    
+    <div class="flex justify-end mt-6">
+      <button class="bg-[#d5dbe0] text-[#4a5568] px-6 py-1.5 rounded text-sm border border-transparent hover:border-gray-400 hover:bg-gray-300 transition-all duration-200">Aplicar</button>
+    </div>
+  </div>
+
+  <!-- 2. Pestañas (Tabs) Dinámicas -->
+  <div class="flex border-b border-gray-300 mb-4 gap-6">
+    <button (click)="cambiarTab('a_conciliar')"
+            [ngClass]="tabActiva === 'a_conciliar' ? 'text-[#004e82] border-[#004e82] font-semibold' : 'text-gray-500 border-transparent hover:text-gray-700'"
+            class="pb-2 text-sm border-b-2 transition-all">
+      Movimientos a conciliar (0)
+    </button>
+    <button (click)="cambiarTab('conciliados')"
+            [ngClass]="tabActiva === 'conciliados' ? 'text-[#004e82] border-[#004e82] font-semibold' : 'text-gray-500 border-transparent hover:text-gray-700'"
+            class="pb-2 text-sm border-b-2 transition-all">
+      Movimientos conciliados (0)
+    </button>
+  </div>
+
+  <!-- 3. Botonera de Acciones -->
+  <div class="flex gap-2 mb-6">
+    <button class="bg-[#e2e6e9] text-[#4a5568] px-4 py-1.5 rounded text-sm border border-transparent hover:border-gray-400 hover:bg-[#d1d5db] transition-all duration-200">
+      Conciliar
+    </button>
+    
+    <!-- Botón Autoconciliar -->
+    <button (click)="ejecutarAutoconciliacion()" class="bg-[#e2e6e9] text-[#4a5568] px-4 py-1.5 rounded text-sm flex items-center gap-1 border border-transparent hover:border-gray-400 hover:bg-[#d1d5db] transition-all duration-200">
+      Autoconciliar 🪄
+    </button>
+    
+    <!-- Botón Importar PDF -->
+    <div class="relative">
+      <input type="file" id="subirPdf" (change)="capturarArchivo($event)" accept=".pdf" class="hidden">
+      <label for="subirPdf" class="bg-[#e2e6e9] text-[#4a5568] px-4 py-1.5 rounded text-sm flex items-center gap-1 cursor-pointer border border-transparent hover:border-gray-400 hover:bg-[#d1d5db] transition-all duration-200">
+        Importar <i class="pi pi-chevron-down text-[10px] ml-1"></i>
+      </label>
+    </div>
+    
+    <button class="bg-[#e2e6e9] text-[#4a5568] px-4 py-1.5 rounded text-sm border border-transparent hover:border-gray-400 hover:bg-[#d1d5db] transition-all duration-200">
+      Exportar
+    </button>
+  </div>
+
+  <!-- 4. Vista Dividida (Tablas) -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    
+    <!-- LADO IZQUIERDO: Banco -->
+    <div class="bg-white border border-gray-200 rounded shadow-sm min-h-[450px] p-5 flex flex-col">
+      
+      <div class="flex justify-between items-center mb-5">
+        <h3 class="text-[15px] font-semibold text-gray-800">Movimientos bancarios</h3>
+        <div class="flex gap-2">
+          <span class="bg-[#f0f2f5] text-gray-500 text-[11px] px-3 py-1 rounded-full border border-gray-200">Banco</span>
+          <span class="bg-[#f0f2f5] text-gray-500 text-[11px] px-3 py-1 rounded-full border border-gray-200">Excel</span>
+          <span class="bg-[#9ecb9b] text-white text-[11px] px-3 py-1 rounded-full shadow-sm">PDF</span>
+        </div>
+      </div>
+      
+      <!-- Buscador y herramientas -->
+      <div class="flex justify-between mb-4">
+        <div class="relative w-48">
+          <input type="text" placeholder="Buscar" class="border border-gray-300 rounded px-3 py-1 text-sm w-full focus:outline-none focus:border-blue-400">
+          <i class="pi pi-search absolute right-3 top-2 text-gray-400 text-xs"></i>
+        </div>
+        <div class="flex gap-1.5">
+          <button class="bg-[#e2e6e9] text-[#4a5568] px-3 py-1 rounded text-xs border border-transparent hover:border-gray-400 hover:bg-[#d1d5db] transition-all duration-200">Etiquetar</button>
+          <button class="bg-[#e2e6e9] text-[#4a5568] px-3 py-1 rounded text-xs flex items-center gap-1 border border-transparent hover:border-gray-400 hover:bg-[#d1d5db] transition-all duration-200">Crear <i class="pi pi-chevron-down text-[9px]"></i></button>
+          <button class="bg-[#e2e6e9] text-[#4a5568] px-3 py-1 rounded text-xs border border-transparent hover:border-gray-400 hover:bg-[#d1d5db] transition-all duration-200">Eliminar</button>
+        </div>
+      </div>
+
+      <!-- Tabla de Datos o Estado Vacío -->
+      <div class="flex-1 flex items-center justify-center" *ngIf="movimientosBanco.length === 0">
+        <p class="text-gray-500 text-sm">Elegí los filtros para visualizar la información</p>
+      </div>
+
+      <div class="overflow-x-auto" *ngIf="movimientosBanco.length > 0">
+        <table class="w-full text-xs text-left text-gray-600">
+          <thead class="bg-gray-50 border-b border-gray-200">
+            <tr>
+              <th class="px-3 py-2 font-medium">Fecha</th>
+              <th class="px-3 py-2 font-medium">Concepto</th>
+              <th class="px-3 py-2 font-medium text-right">Debe</th>
+              <th class="px-3 py-2 font-medium text-right">Haber</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let mov of movimientosBanco" class="border-b border-gray-100 hover:bg-gray-50 cursor-pointer">
+              <td class="px-3 py-2">{{ mov.fecha }}</td>
+              <td class="px-3 py-2">{{ mov.concepto }}</td>
+              <td class="px-3 py-2 text-right">{{ mov.debe > 0 ? mov.debe : '' }}</td>
+              <td class="px-3 py-2 text-right">{{ mov.haber > 0 ? mov.haber : '' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- LADO DERECHO: Xubio -->
+    <div class="bg-white border border-gray-200 rounded shadow-sm min-h-[450px] p-5 flex flex-col">
+      <div class="flex justify-between items-center mb-5">
+        <h3 class="text-[15px] font-semibold text-gray-800">Movimientos en Xubio</h3>
+      </div>
+      
+      <!-- Buscador -->
+      <div class="flex justify-start mb-4">
+        <div class="relative w-48">
+          <input type="text" placeholder="Buscar" class="border border-gray-300 rounded px-3 py-1 text-sm w-full focus:outline-none focus:border-blue-400">
+          <i class="pi pi-search absolute right-3 top-2 text-gray-400 text-xs"></i>
+        </div>
+      </div>
+
+      <!-- Estado Vacío -->
+      <div class="flex-1 flex items-center justify-center">
+        <p class="text-gray-500 text-sm">Elegí los filtros para visualizar la información</p>
+      </div>
+    </div>
+
+  </div>
+</div>

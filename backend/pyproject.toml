@@ -1,0 +1,14 @@
+[project]
+name = "api-conciliacion"
+version = "0.1.0"
+description = "Backend de conciliación bancaria"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
+    "python-multipart>=0.0.9",
+    "pydantic-settings>=2.2.1",
+    "pandas>=2.2.0",
+    "pdfplumber>=0.11.0",
+    "httpx>=0.27.0"
+]Ñ

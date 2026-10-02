@@ -171,20 +171,19 @@ def generar_excel_galicia(filas_data, excel_path, log_callback):
         return False, "No se encontraron movimientos válidos en Galicia."
 
     log_callback(f"Procesando {len(filas_data)} movimientos...")
-    
-    fila_inicial = {
-        "FECHA": "XXX", "DETALLE": "SALDO INICIAL (MODIFICAR)", 
-        "DEBE": 0, "HABER": 0, "SALDO": "XXX"
-    }
-    filas_data.insert(0, fila_inicial)
 
+    # OJO: antes se metia una fila de plantilla con SALDO="XXX" para que una
+    # persona completara el saldo inicial a mano y despues se pisaba la columna
+    # SALDO con formulas de Excel. Eso hacia dos cosas malas: la fila "XXX"
+    # salia despues como un movimiento falso en la respuesta, y el valor_saldo
+    # que el extractor si leyo de cada linea del PDF se tiraba a la basura.
+    # Como el archivo se borra al terminar y nadie lo abre, no hay nada que
+    # completar a mano: se respeta el saldo que trajo cada fila.
     df = pd.DataFrame(filas_data)
     df = df[["FECHA", "DETALLE", "DEBE", "HABER", "SALDO"]]
 
-    for i in range(1, len(df)):
-        fila_excel_actual = i + 2
-        fila_excel_anterior = fila_excel_actual - 1
-        formula = f"=E{fila_excel_anterior}-D{fila_excel_actual}+C{fila_excel_actual}" # SaldoAnt + Haber - Debe
-        df.at[i, "SALDO"] = formula
+    # pandas 3 no deja escribir un string dentro de una columna float64.
+    # Sin este cast, el df.at[] de la formula de abajo revienta con TypeError.
+    df["SALDO"] = df["SALDO"].astype(object)
 
     return guardar_excel(df, excel_path)

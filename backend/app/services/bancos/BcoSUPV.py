@@ -133,7 +133,17 @@ def extraer_supervielle(pdf_path, excel_path, log_callback):
                             valor_monto_abs = abs(limpiar_numero(str_movimiento))
                             
                             tipo_mov = tracker.identificar_movimiento(valor_monto_abs, valor_saldo_linea)
-                            
+                            if tipo_mov is None:
+                                # La linea no cuadra contra el saldo anterior: la omitimos.
+                                # Antes caia en el 'else' y se contabilizaba como HABER.
+                                log_callback(
+                                    f"SUPV: linea sin cuadrar (importe {valor_monto_abs:.2f}, "
+                                    f"saldo {valor_saldo_linea:.2f}, "
+                                    f"saldo previo {tracker.saldo_actual:.2f}); se omite"
+                                )
+                                transaccion_actual = None
+                                continue
+
                             if tipo_mov == 'DEBE':
                                 debe = valor_monto_abs
                                 haber = 0.0
@@ -172,6 +182,10 @@ def generar_excel_supervielle(filas, excel_path, log_callback):
     
     df = df[["CUENTA", "FECHA", "DETALLE", "DEBE", "HABER", "SALDO_CALC"]]
     df.rename(columns={"SALDO_CALC": "SALDO"}, inplace=True)
+
+    # pandas 3 no deja escribir un string dentro de una columna float64.
+    # Sin este cast, el df.at[] de la formula de abajo revienta con TypeError.
+    df["SALDO"] = df["SALDO"].astype(object)
 
     for i in range(len(df)):
         fila_excel_actual = i + 2 

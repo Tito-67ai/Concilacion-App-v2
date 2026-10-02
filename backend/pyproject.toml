@@ -1,7 +1,7 @@
 [project]
 name = "api-conciliacion"
 version = "0.1.0"
-description = "Backend de conciliación bancaria"
+description = "Backend de conciliacion bancaria"
 requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.110.0",
@@ -9,6 +9,20 @@ dependencies = [
     "python-multipart>=0.0.9",
     "pydantic-settings>=2.2.1",
     "pandas>=2.2.0",
+    "openpyxl>=3.1.2",
     "pdfplumber>=0.11.0",
     "httpx>=0.27.0"
-]Ñ
+]
+
+# dependency-groups (PEP 735) y no optional-dependencies: uv instala este grupo
+# en cada sync, asi que "uv run pytest" funciona sin agregar --extra dev.
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0"
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"

@@ -152,6 +152,10 @@ def generar_excel_icbc(filas, excel_path, log_callback):
     df = df[["FECHA", "DETALLE", "DEBE", "HABER", "SALDO_CALC"]]
     df.rename(columns={"SALDO_CALC": "SALDO"}, inplace=True)
 
+    # pandas 3 no deja escribir un string dentro de una columna float64.
+    # Sin este cast, el df.at[] de la formula de abajo revienta con TypeError.
+    df["SALDO"] = df["SALDO"].astype(object)
+
     for i in range(len(df)):
         fila_excel_actual = i + 2 
         if df.at[i, "FECHA"] == "INICIO":

@@ -167,6 +167,10 @@ def generar_excel_mp(filas, excel_path, log_callback):
 
     df["SALDO"] = df["SALDO"].astype(object)
 
+    # pandas 3 no deja escribir un string dentro de una columna float64.
+    # Sin este cast, el df.at[] de la formula de abajo revienta con TypeError.
+    df["SALDO"] = df["SALDO"].astype(object)
+
     for i in range(len(df)):
         fila_excel_actual = i + 2 
         if df.at[i, "FECHA"] == "INICIO":

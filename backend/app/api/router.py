@@ -1,7 +1,9 @@
 from fastapi import APIRouter
-from app.api.rutas import extractos
+
+from app.api.rutas import extractos, xubio
 
 api_router = APIRouter()
 
 # Agrupamos todas las rutas bajo prefijos limpios
 api_router.include_router(extractos.router, prefix="/extractos", tags=["Extractos"])
+api_router.include_router(xubio.router, prefix="/xubio", tags=["Xubio"])

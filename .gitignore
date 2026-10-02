@@ -1,0 +1,15 @@
+# Solo lo de la raiz del repo. Cada subproyecto tiene su propio .gitignore.
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editores
+.idea/
+*.swp
+*.swo
+
+# Salidas de compilacion sueltas en la raiz
+/dist/
+/build/

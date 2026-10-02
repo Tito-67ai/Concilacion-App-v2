@@ -133,7 +133,16 @@ def extraer_cmf(pdf_path, excel_path, log_callback):
                             
                             # Le pedimos a nuestro tracker que evalúe si este importe restó o sumó al saldo
                             tipo_mov = tracker.identificar_movimiento(valor_monto_abs, valor_saldo_linea)
-                            
+                            if tipo_mov is None:
+                                # La linea no cuadra contra el saldo anterior: la omitimos.
+                                # Antes caia en el 'else' y se contabilizaba como HABER.
+                                log_callback(
+                                    f"CMF: linea sin cuadrar (importe {valor_monto_abs:.2f}, "
+                                    f"saldo {valor_saldo_linea:.2f}, "
+                                    f"saldo previo {tracker.saldo_actual:.2f}); se omite"
+                                )
+                                continue
+
                             # Si fue una resta (salida de dinero), va al DEBE
                             if tipo_mov == 'DEBE':
                                 debe = valor_monto_abs
@@ -206,6 +215,10 @@ def generar_excel_cmf(filas, excel_path, log_callback):
     df.rename(columns={"SALDO_CALC": "SALDO"}, inplace=True)
 
     # Bucle para inyectar fórmulas matemáticas de Excel en la columna Saldo fila por fila
+    # pandas 3 no deja escribir un string dentro de una columna float64.
+    # Sin este cast, el df.at[] de la formula de abajo revienta con TypeError.
+    df["SALDO"] = df["SALDO"].astype(object)
+
     for i in range(len(df)):
         fila_excel_actual = i + 2 # Sumamos 2 porque el índice en Python empieza en 0 y el Excel tiene 1 fila de encabezado
         

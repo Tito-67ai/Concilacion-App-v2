@@ -1,0 +1,16 @@
+# Normaliza los finales de linea: LF dentro del repo, en cualquier sistema.
+# Sin esto, en Windows con core.autocrlf=true cada checkout deja los archivos
+# con CRLF y cualquier comparacion contra el repo parece que tiene cambios.
+* text=auto eol=lf
+
+# Binarios: git no debe intentar normalizar ni convertir finales de linea.
+*.pdf   binary
+*.xlsx  binary
+*.xls   binary
+*.png   binary
+*.jpg   binary
+*.gif   binary
+*.ico   binary
+*.woff  binary
+*.woff2 binary
+*.pyc   binary

@@ -308,8 +308,11 @@ def test_banco_no_soportado_falla_con_mensaje_util():
         procesar_archivo(banco_id="NARANJA", ruta_pdf="no-importa.pdf")
 
 
-def test_bancos_tienen_los_diez_registrados():
-    esperados = {"BBK", "BBVA", "CMF", "GAL", "HIPO", "ICBC", "MP", "PBA", "RIO", "SUPV"}
+def test_bancos_tienen_los_once_registrados():
+    esperados = {
+        "BBK", "BBVA", "CMF", "GAL", "HIPO", "ICBC", "MP", "PBA", "RIO", "SANT",
+        "SUPV",
+    }
     assert set(BANCOS) == esperados
 
 

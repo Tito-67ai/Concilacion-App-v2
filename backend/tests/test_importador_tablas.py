@@ -227,7 +227,7 @@ def test_tabla_vacia_falla_con_mensaje():
 
 def test_extension_no_soportada_en_tablas():
     with pytest.raises(ErrorDeExtraccion, match="no soportado"):
-        procesar_tabla("BBVA", "extracto.xls")
+        procesar_tabla("BBVA", "extracto.txt")
 
 
 def test_la_tabla_se_borra_siempre(tmp_path):
@@ -317,18 +317,37 @@ def test_csv_con_titulo_arriba(tmp_path):
 # --------------------------------------------------------------------------
 
 
-def test_la_ruta_declara_los_tres_formatos():
-    assert set(FORMATOS) == {".pdf", ".xlsx", ".csv"}
+def test_la_ruta_declara_los_formatos():
+    assert set(FORMATOS) >= {".pdf", ".xlsx", ".xls", ".csv"}
     assert FORMATOS[".pdf"] == "pdf"
     assert FORMATOS[".xlsx"] == "tabla"
+    assert FORMATOS[".xls"] == "tabla"
 
 
-def test_bancos_soportados_informa_los_formatos(client):
+def test_bancos_soportados_informan_los_formatos(client):
     respuesta = client.get("/api/extractos/bancos")
     assert respuesta.status_code == 200
     cuerpo = respuesta.json()
     assert "BBVA" in cuerpo["bancos"]
-    assert set(cuerpo["formatos"]) == {".pdf", ".xlsx", ".csv"}
+    assert set(cuerpo["formatos"]) >= {".pdf", ".xlsx", ".xls", ".csv"}
+
+
+def test_el_frontend_acepta_los_cuatro_formatos():
+    # Si el input no declara .xls, el usuario no puede seleccionar el archivo
+    # aunque el backend lo sepa leer.
+    html = (
+        Path(__file__).resolve().parents[2]
+        / "frontend"
+        / "src"
+        / "app"
+        / "pantallas"
+        / "conciliacion"
+        / "conciliacion.html"
+    )
+    if not html.exists():
+        pytest.skip("el frontend no esta en este checkout")
+
+    assert 'accept=".pdf,.xlsx,.xls,.csv"' in html.read_text(encoding="utf-8")
 
 
 def test_extension_no_soportada_en_la_ruta(client):
@@ -425,3 +444,80 @@ def test_subir_xlsx_a_un_banco_no_soportado(client, tmp_path):
 
     assert respuesta.status_code == 400
     assert "no esta soportado" in respuesta.json()["detail"]
+
+# --------------------------------------------------------------------------
+# .xls viejo (BIFF / OLE2)
+# --------------------------------------------------------------------------
+#
+# Los portales viejos siguen entregando .xls, que no es un zip como el .xlsx:
+# tiene una firma OLE2 y lo lee xlrd, no openpyxl.
+
+
+def _xls(ruta, encabezados, filas):
+    xlwt = pytest.importorskip("xlwt")
+
+    libro = xlwt.Workbook()
+    hoja = libro.add_sheet("Extracto")
+    for columna, titulo in enumerate(encabezados):
+        hoja.write(0, columna, titulo)
+    for f, fila in enumerate(filas, start=1):
+        for columna, valor in enumerate(fila):
+            hoja.write(f, columna, valor)
+    libro.save(str(ruta))
+    return ruta
+
+
+def test_el_xls_empieza_con_la_firma_ole2(tmp_path):
+    ruta = _xls(
+        tmp_path / "portal.xls",
+        ["FECHA", "DETALLE", "DEBE", "HABER"],
+        [["02/07/2026", "Pago", 100.0, 0]],
+    )
+
+    with open(ruta, "rb") as fh:
+        assert fh.read(8).hex() == "d0cf11e0a1b11ae1"
+
+
+def test_subir_xls_por_la_ruta_devuelve_movimientos(client, tmp_path):
+    ruta = _xls(
+        tmp_path / "portal.xls",
+        ["FECHA", "DETALLE", "DEBE", "HABER", "SALDO"],
+        [
+            ["01/07/2026", "MANTENIMIENTO DE CUENTA", 5500.0, 0, 744760.36],
+            ["03/07/2026", "TRANSFERENCIA RECIBIDA", 0, 120000.0, 864760.36],
+        ],
+    )
+    with open(ruta, "rb") as fh:
+        contenido = fh.read()
+
+    respuesta = client.post(
+        "/api/extractos/procesar",
+        data={"banco": "GENERICO"},
+        files={"archivo": ("extracto.xls", contenido, "application/vnd.ms-excel")},
+    )
+
+    assert respuesta.status_code == 200, respuesta.text
+    cuerpo = respuesta.json()
+    assert cuerpo["origen"] == "tabla"
+    assert cuerpo["cantidad_movimientos"] == 2
+    assert cuerpo["datos"][0]["debe"] == pytest.approx(5500.0)
+    assert cuerpo["datos"][0]["saldo"] == pytest.approx(744760.36)
+
+
+def test_un_xlsx_renombrado_a_xls_se_rechaza(client, tmp_path):
+    ruta = _xlsx(
+        tmp_path / "trampa.xls",
+        ["FECHA", "DETALLE", "DEBE", "HABER"],
+        [["02/07/2026", "Pago", 100.0, 0]],
+    )
+    with open(ruta, "rb") as fh:
+        contenido = fh.read()
+
+    respuesta = client.post(
+        "/api/extractos/procesar",
+        data={"banco": "GENERICO"},
+        files={"archivo": ("trampa.xls", contenido, "application/vnd.ms-excel")},
+    )
+
+    assert respuesta.status_code == 400
+    assert "OLE2" in respuesta.json()["detail"] or "xls" in respuesta.json()["detail"]

@@ -32,3 +32,13 @@ htmlcov/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Extractos bancarios reales: nunca se versionan (el repo es publico y llevan
+# CBU, CUIT, cuenta y movimientos). Los PDF de prueba que usan los tests van en
+# backend/muestras/ y son sinteticos, generados por tests/generar_muestras.py.
+muestra_*.pdf
+muestra_*.xls
+extracto_*.pdf
+extracto_*.xlsx
+extracto_*.xls
+extracto_*.csv

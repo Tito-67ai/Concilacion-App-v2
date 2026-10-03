@@ -45,7 +45,7 @@ def limpiar_numero(s, es_formato_ingles: bool = False) -> float:
     if not texto or texto in ("-", "+", ".", ",", "-.", "+."):
         return 0.0
 
-    negativo = texto.startswith("-")
+    negativo = texto.startswith("-") or str(s).rstrip().endswith("-") or str(s).rstrip().endswith("(D)")
     texto = texto.lstrip("+-")
 
     if es_formato_ingles:

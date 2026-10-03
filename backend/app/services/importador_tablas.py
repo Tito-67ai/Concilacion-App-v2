@@ -22,7 +22,7 @@ from app.services.procesador_central import ErrorDeExtraccion, _df_to_movimiento
 
 logger = logging.getLogger(__name__)
 
-EXTENSIONES = {".xlsx", ".csv"}
+EXTENSIONES = {".xlsx", ".xls", ".csv"}
 
 # De cada columna canonica, los encabezados que usan los bancos. Se comparan ya
 # normalizados (mayusculas, sin acentos ni signos), asi que aca van sin tildes.
@@ -298,7 +298,10 @@ def leer_tabla(ruta: str) -> pd.DataFrame:
     if not os.path.isfile(ruta):
         raise ErrorDeExtraccion(f"No se encuentra el archivo a procesar: {ruta}")
 
-    df = _leer_xlsx(ruta) if extension == ".xlsx" else _leer_csv(ruta)
+    # El .xls viejo tambien entra por la misma lectura: pandas usa xlrd por
+    # debajo y la unica diferencia es el contenedor (OLE2 en vez de zip).
+    lector = _leer_xlsx if extension in (".xlsx", ".xls") else _leer_csv
+    df = lector(ruta)
 
     if df is None or df.empty:
         raise ErrorDeExtraccion("El archivo no tiene filas.")

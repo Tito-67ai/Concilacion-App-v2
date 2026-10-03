@@ -2,8 +2,14 @@ import { Component, OnInit } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { catchError, throwError, timeout } from 'rxjs';
 
 const API = 'http://127.0.0.1:8000/api';
+
+// Un PDF de 30 paginas con tablas tarda bastante en pdfplumber. Si no se corta,
+// el overlay "Procesando..." queda arriba para siempre cuando algo se rompe en
+// el medio y el usuario no tiene forma de saber que paso.
+const TIMEOUT_IMPORTACION_MS = 180000;
 
 @Component({
   selector: 'app-conciliacion',
@@ -63,15 +69,26 @@ export class ConciliacionComponent implements OnInit {
   }
 
   capturarArchivo(event: any) {
-    this.archivoSeleccionado = event.target.files[0];
+    const input = event.target as HTMLInputElement;
+    this.archivoSeleccionado = input.files?.[0] ?? null;
     this.errorMensaje = '';
-    if (this.archivoSeleccionado) {
-      this.procesarArchivo();
+
+    if (!this.archivoSeleccionado) {
+      return;
     }
+
+    this.procesarArchivo();
+
+    // Limpiar el input hace que elegir dos veces el mismo archivo vuelve a
+    // disparar el change: sin esto el segundo intento no hace nada y parece que
+    // la aplicacion se froze.
+    input.value = '';
   }
 
   procesarArchivo() {
     if (!this.archivoSeleccionado) return;
+
+    const archivo = this.archivoSeleccionado;
     if (!this.bancoSeleccionado) {
       this.errorMensaje = 'Elegí el banco del extracto antes de importar.';
       return;
@@ -80,23 +97,48 @@ export class ConciliacionComponent implements OnInit {
     this.cargando = true;
     const formData = new FormData();
     formData.append('banco', this.bancoSeleccionado);
-    formData.append('archivo', this.archivoSeleccionado);
+    formData.append('archivo', archivo, archivo.name);
 
-    this.http.post(`${API}/extractos/procesar`, formData).subscribe({
-      next: (respuesta: any) => {
-        this.movimientosBanco = respuesta.datos ?? [];
-        this.cargando = false;
-        if (this.movimientosBanco.length === 0) {
-          this.errorMensaje = `El archivo se leyó pero no tiene movimientos para ${this.bancoSeleccionado}.`;
-        }
-      },
-      error: (error) => {
-        console.error("Error procesando el extracto", error);
-        this.cargando = false;
-        this.movimientosBanco = [];
-        this.errorMensaje = this.mensajeDeError(error);
-      }
-    });
+    try {
+      this.http
+        .post(`${API}/extractos/procesar`, formData)
+        .pipe(
+          timeout(TIMEOUT_IMPORTACION_MS),
+          catchError((error) => {
+            if (error?.name === 'TimeoutError') {
+              error.error = {
+                detail:
+                  `El backend no respondió en ${TIMEOUT_IMPORTACION_MS / 1000} segundos. ` +
+                  'Puede que el PDF sea muy pesado o que un extractor del banco se haya quedado leyendo.',
+              };
+            }
+            return throwError(() => error);
+          })
+        )
+        .subscribe({
+          next: (respuesta: any) => {
+            this.movimientosBanco = respuesta.datos ?? [];
+            this.cargando = false;
+            if (this.movimientosBanco.length === 0) {
+              this.errorMensaje = `El archivo se leyó pero no tiene movimientos para ${this.bancoSeleccionado}.`;
+            }
+          },
+          error: (error) => {
+            console.error("Error procesando el extracto", error);
+            this.cargando = false;
+            this.movimientosBanco = [];
+            this.errorMensaje = this.mensajeDeError(error);
+          }
+        });
+    } catch (e) {
+      // Si falla algo antes de salir la request (por ejemplo, si el backend no
+      // esta levantado), cargando queda en true y el overlay tapa la pantalla
+      // para siempre.
+      console.error("No se pudo enviar el extracto", e);
+      this.cargando = false;
+      this.errorMensaje =
+        'No se pudo enviar el archivo al backend. Revisá que FastAPI esté corriendo en el puerto 8000.';
+    }
   }
 
   /**

@@ -8,6 +8,7 @@ import pandas as pd
 
 from app.models.schemas import MovimientoBancario
 from app.services.Tools import limpiar_numero
+from app.services.clasificacion import clasificar
 from app.services.bancos import (
     BcoBBK,
     BcoBBVA,
@@ -128,6 +129,22 @@ def _es_saldo_inicial(concepto) -> bool:
     return any(marca in arriba for marca in MARCAS_SALDO_INICIAL)
 
 
+def _es_semilla(fila) -> bool:
+    """
+    True si la fila solo arranca la cadena de saldos y no es un movimiento.
+
+    Los extractores marcan el saldo de apertura con un texto ("SALDO INICIAL",
+    "SALDO ULTIMO EXTRACTO AL 30/06/2026") y le dejan DEBE y HABER en cero. Esa
+    fila existe para decirle de donde arrancar, no para cruzarse con Xubio: si se
+    emite queda una fila 0/00 que aparece para siempre en la bandeja de
+    pendientes.
+
+    Exigir ademas DEBE y HABER en cero evita tragarse un movimiento real si un
+    banco marca tambien una fila con importe: en ese caso gana el importe.
+    """
+    return fila["es_saldo_inicial"] and not fila["debe"] and not fila["haber"]
+
+
 def _referencia(fila):
     valor = _columna(fila, "REFERENCIA", "ID_OPERACION", "Referencia")
     if valor is None:
@@ -177,11 +194,11 @@ def _df_to_movimientos(df, nombre_banco: str = "?") -> list[MovimientoBancario]:
         logger.warning("%s: el extractor genero un Excel sin filas", nombre_banco)
         return []
 
-    hay_movimientos = any(not f["es_saldo_inicial"] for f in filas)
+    hay_movimientos = any(not _es_semilla(f) for f in filas)
     # El saldo inicial no tiene fecha propia: se le da la del primer movimiento
     # real del periodo, que es a quien corresponde ese saldo.
     primera_fecha = next(
-        (f["fecha"] for f in filas if not f["es_saldo_inicial"] and f["fecha"]),
+        (f["fecha"] for f in filas if not _es_semilla(f) and f["fecha"]),
         None,
     )
 
@@ -207,59 +224,63 @@ def _df_to_movimientos(df, nombre_banco: str = "?") -> list[MovimientoBancario]:
         if f["fecha"]:
             fecha_actual = f["fecha"]
 
-        if f["es_saldo_inicial"]:
+        if _es_semilla(f):
             saldo = _dec(f["saldo_de_origen"])
             saldo_conocido = True
-            fecha_fila = primera_fecha or fecha_actual
             if f["saldo_de_origen"]:
-                logger.info(
-                    "%s: saldo inicial %.2f", nombre_banco, f["saldo_de_origen"]
-                )
-        else:
-            if not saldo_conocido and f["saldo_de_origen"]:
-                # El banco no trae fila de saldo inicial (Galicia, entre otros),
-                # pero si imprime el saldo de cada linea. El de la primera fila es
-                # el saldo ya aplicado, asi que para obtener el de apertura hay que
-                # sacar el movimiento de esa misma fila. Si no, se descuenta dos
-                # veces y todos los saldos quedan corridos.
-                saldo = (
-                    _dec(f["saldo_de_origen"]) - _dec(f["haber"]) + _dec(f["debe"])
-                )
-                saldo_conocido = True
-                logger.info(
-                    "%s: sin fila de saldo inicial, se deduce de la primera linea: %.2f",
-                    nombre_banco,
-                    saldo,
-                )
+                logger.info("%s: saldo inicial %.2f", nombre_banco, f["saldo_de_origen"])
+            # La fila de saldo inicial siembra la cadena y nada mas: no tiene
+            # DEBE ni HABER, asi que nunca va a cruzar con Xubio. Emitarla deja
+            # una fila 0/00 perpetua en la bandeja de pendientes. El saldo de
+            # apertura no se pierde, se deriva del primer movimiento:
+            #   saldo_inicial = movimientos[0].saldo + movimientos[0].debe
+            #                                     - movimientos[0].haber
+            continue
 
-            saldo = saldo - _dec(f["debe"]) + _dec(f["haber"])
-            fecha_fila = f["fecha"] or fecha_actual
+        # Todo lo que sigue es un movimiento. Si la marca de saldo inicial vino
+        # con un importe, el importe manda y la fila se trata como una mas.
+        if not saldo_conocido and f["saldo_de_origen"]:
+            # El banco no trae fila de saldo inicial (Galicia, entre otros),
+            # pero si imprime el saldo de cada linea. El de la primera fila es
+            # el saldo ya aplicado, asi que para obtener el de apertura hay que
+            # sacar el movimiento de esa misma fila. Si no, se descuenta dos
+            # veces y todos los saldos quedan corridos.
+            saldo = _dec(f["saldo_de_origen"]) - _dec(f["haber"]) + _dec(f["debe"])
+            saldo_conocido = True
+            logger.info(
+                "%s: sin fila de saldo inicial, se deduce de la primera linea: %.2f",
+                nombre_banco,
+                saldo,
+            )
 
-            if not fecha_fila:
-                ultimo_error_fecha = f["concepto"][:60]
-                continue
+        saldo = saldo - _dec(f["debe"]) + _dec(f["haber"])
+        fecha_fila = f["fecha"] or fecha_actual
 
-            if f["debe"] == 0 and f["haber"] == 0:
-                # No lo borramos: puede ser un movimiento legitimo en cero o un
-                # importe que el parser no logro capturar. Se cuenta y se avisa.
-                sin_importe += 1
+        if not fecha_fila:
+            ultimo_error_fecha = f["concepto"][:60]
+            continue
 
-            # Contraste contra el saldo que el banco imprimio en la linea. Solo
-            # tiene sentido si ese valor existe: en los bancos que dejan 0.0 y
-            # calculan con formula de Excel, el 0.0 no es informacion real.
-            if f["saldo_de_origen"] != 0.0:
-                saldos_impresos += 1
-                if abs(_dec(f["saldo_de_origen"]) - saldo) > Decimal("0.05"):
-                    saldos_descuadrados += 1
-                    if saldos_descuadrados <= 10:
-                        logger.warning(
-                            "%s: el saldo impreso no cuadra con el calculado en %r "
-                            "(el banco dice %.2f, nosotros %.2f)",
-                            nombre_banco,
-                            f["concepto"][:50],
-                            f["saldo_de_origen"],
-                            float(saldo),
-                        )
+        if f["debe"] == 0 and f["haber"] == 0:
+            # No lo borramos: puede ser un movimiento legitimo en cero o un
+            # importe que el parser no logro capturar. Se cuenta y se avisa.
+            sin_importe += 1
+
+        # Contraste contra el saldo que el banco imprimio en la linea. Solo
+        # tiene sentido si ese valor existe: en los bancos que dejan 0.0 y
+        # calculan con formula de Excel, el 0.0 no es informacion real.
+        if f["saldo_de_origen"] != 0.0:
+            saldos_impresos += 1
+            if abs(_dec(f["saldo_de_origen"]) - saldo) > Decimal("0.05"):
+                saldos_descuadrados += 1
+                if saldos_descuadrados <= 10:
+                    logger.warning(
+                        "%s: el saldo impreso no cuadra con el calculado en %r "
+                        "(el banco dice %.2f, nosotros %.2f)",
+                        nombre_banco,
+                        f["concepto"][:50],
+                        f["saldo_de_origen"],
+                        float(saldo),
+                    )
 
         movimientos.append(
             MovimientoBancario(
@@ -269,6 +290,7 @@ def _df_to_movimientos(df, nombre_banco: str = "?") -> list[MovimientoBancario]:
                 debe=f["debe"],
                 haber=f["haber"],
                 saldo=float(saldo),
+                categoria=clasificar(f["concepto"]),
             )
         )
 

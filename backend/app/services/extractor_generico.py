@@ -620,13 +620,17 @@ def _fusionar_duplicados(filas):
     movimientos de 1.500,00 donde habia uno.
     """
     fusionadas = []
-    vistas = {}
+    clave_anterior = None
     for fila in filas:
         clave = (fila["FECHA"], round(fila["DEBE"] + fila["HABER"], 2))
-        if clave in vistas and vistas[clave] is fusionadas[-1]:
+        # Solo se fusiona con la fila inmediatamente anterior: el problema que
+        # resuelve es el concepto partido en dos renglones del PDF, que produce
+        # dos filas contiguas. Dos movimientos legítimos e iguales pero en fechas
+        # distintas tienen claves distintas y no se tocan.
+        if clave == clave_anterior and fusionadas:
             previa = fusionadas[-1]
             previa["DETALLE"] = f"{previa['DETALLE']} {fila['DETALLE']}".strip()
             continue
-        vistas[clave] = len(fusionadas)
+        clave_anterior = clave
         fusionadas.append(fila)
     return fusionadas

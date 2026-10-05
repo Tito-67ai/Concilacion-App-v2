@@ -1,14 +1,8 @@
 import pdfplumber
 import pandas as pd
 import re
-import sys
-import os
 
-# Configuración de ruta
-carpeta_padre = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(carpeta_padre)
-
-from Tools import es_numero_bancario, limpiar_numero, guardar_excel
+from app.services.Tools import es_numero_bancario, limpiar_numero, guardar_excel
 
 def extraer_mp(pdf_path, excel_path, log_callback):
     """

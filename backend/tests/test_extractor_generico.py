@@ -7,6 +7,7 @@ from app.services.extractor_generico import (
     _anio_del_documento,
     _completar_anio,
     _es_importe,
+    _fusionar_duplicados,
     _indices_de_importes,
 )
 
@@ -132,3 +133,55 @@ def test_es_numero_bancario_rechaza_texto_con_letras():
     # RE_TOKEN_NUMERICO antes de llamarlo, por eso el caso sale False aca solo
     # para los tokens que no tienen ningun digito util.
     assert es_numero_bancario("DEBITO") is False
+
+
+# --------------------------------------------------------------------------
+# Fusion de duplicados
+# --------------------------------------------------------------------------
+
+
+def _fila(fecha, detalle, debe=0.0, haber=0.0):
+    return {"FECHA": fecha, "DETALLE": detalle, "DEBE": debe, "HABER": haber}
+
+
+def test_fusiona_el_concepto_partido_en_dos_renglones():
+    # El caso del docstring: el texto del PDF se parte y el motor generico
+    # arma dos filas con la misma fecha y el mismo importe cuando en realidad
+    # hay un solo movimiento. Sin la fusion, el cruce despues ve dos
+    # movimientos de 1.500,00 y uno queda pendiente para siempre.
+    resultado = _fusionar_duplicados(
+        [
+            _fila("01-07-2026", "TRANSFERENCIA", 1500.0),
+            _fila("01-07-2026", "FACTURA 000123", 0.0, 1500.0),
+        ]
+    )
+
+    assert len(resultado) == 1
+    assert resultado[0]["DETALLE"] == "TRANSFERENCIA FACTURA 000123"
+    assert resultado[0]["DEBE"] == 1500.0
+
+
+def test_no_fusiona_dos_movimientos_legitimos_iguales():
+    # Mismo importe y misma fecha, pero no contiguos: son dos movimientos
+    # distintos y ninguno se puede borrar.
+    filas = [
+        _fila("01-07-2026", "COBRO A", 1500.0),
+        _fila("02-07-2026", "OTRO MOVIMIENTO", 250.0),
+        _fila("01-07-2026", "COBRO B", 1500.0),
+    ]
+    resultado = _fusionar_duplicados(filas)
+
+    assert len(resultado) == 3
+    assert [f["DETALLE"] for f in resultado] == [
+        "COBRO A",
+        "OTRO MOVIMIENTO",
+        "COBRO B",
+    ]
+
+
+def test_no_fusiona_si_el_importe_es_distinto():
+    filas = [
+        _fila("01-07-2026", "TRANSFERENCIA", 1500.0),
+        _fila("01-07-2026", "TRANSFERENCIA", 2500.0),
+    ]
+    assert len(_fusionar_duplicados(filas)) == 2

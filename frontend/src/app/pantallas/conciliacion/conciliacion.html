@@ -13,6 +13,108 @@
     <p class="text-gray-700 font-semibold text-lg">Procesando datos con FastAPI...</p>
   </div>
 
+  <!-- APARTADO DE IMPORTACIÓN: al elegir una vía aparece esto en lugar de la
+       pantalla de conciliación, para subir el archivo sin el ruido de las
+       tablas. Se cierra solo cuando el archivo se leyó bien. -->
+  <div *ngIf="enApartadoDeImportacion && opcionActiva">
+    <div class="bg-white border border-gray-200 rounded p-6 shadow-sm max-w-3xl mx-auto">
+
+      <div class="flex items-start justify-between mb-6">
+        <div class="flex items-start gap-3">
+          <i class="pi text-[#004e82] text-2xl mt-0.5" [ngClass]="opcionActiva.icono"></i>
+          <div>
+            <h3 class="text-lg text-gray-800 font-semibold">Subir extracto {{ opcionActiva.titulo }}</h3>
+            <p class="text-sm text-gray-500 mt-1">{{ opcionActiva.detalle }}</p>
+          </div>
+        </div>
+        <button (click)="cerrarApartadoImportacion()"
+                class="text-sm text-gray-500 hover:text-gray-800 flex items-center gap-1 px-2 py-1">
+          <i class="pi pi-arrow-left text-xs"></i> Volver
+        </button>
+      </div>
+
+      <!-- El banco elige el extractor del PDF, asi que solo se pide en esa vía -->
+      <div *ngIf="modoImportacion === 'pdf'" class="mb-6">
+        <label class="block text-xs text-gray-600 mb-1">
+          Banco del extracto <span class="text-red-500">*</span>
+        </label>
+        <div class="relative">
+          <select [(ngModel)]="bancoSeleccionado"
+                  class="w-full border border-gray-300 rounded p-2 text-sm text-gray-700 h-10 appearance-none bg-transparent focus:outline-none focus:border-blue-400">
+            <option *ngFor="let banco of bancos" [value]="banco">{{ banco }}</option>
+          </select>
+          <i class="pi pi-chevron-down absolute right-3 top-3.5 text-xs text-gray-400 pointer-events-none"></i>
+        </div>
+        <p class="text-xs text-gray-500 mt-1.5">
+          Define qué extractor lee el PDF. Si el parser del banco no puede con el
+          archivo, entra el motor genérico como rescate.
+        </p>
+      </div>
+
+      <div *ngIf="modoImportacion === 'tabla'" class="mb-6 bg-blue-50 border border-blue-200 rounded px-4 py-3">
+        <p class="text-xs text-blue-900">
+          <i class="pi pi-info-circle mr-1"></i>
+          Acá no hace falta elegir el banco: las columnas se reconocen por el
+          encabezado del archivo. Tiene que traer fecha, concepto y los importes
+          de debe y haber; los nombres exactos los entiende el importador.
+        </p>
+      </div>
+
+      <!-- Zona de carga: click o arrastre -->
+      <input type="file" id="subirArchivoExtracto" (change)="capturarArchivo($event)"
+             [attr.accept]="opcionActiva.acepta" class="hidden">
+
+      <label for="subirArchivoExtracto"
+             (dragover)="alArrastrarSobre($event)"
+             (dragleave)="alArrastrarSalir($event)"
+             (drop)="alSoltarArchivo($event)"
+             [ngClass]="arrastrandoArchivo
+               ? 'border-[#004e82] bg-blue-50'
+               : 'border-gray-300 bg-gray-50 hover:border-[#004e82] hover:bg-gray-100'"
+             class="flex flex-col items-center justify-center rounded border-2 border-dashed py-12 px-6 text-center cursor-pointer transition-colors">
+        <i class="pi pi-cloud-upload text-4xl text-[#004e82] mb-3"></i>
+        <span class="text-sm text-gray-700 font-medium">
+          Arrastrá el archivo acá o hacé clic para elegirlo
+        </span>
+        <span class="text-xs text-gray-500 mt-1">
+          Formatos: {{ opcionActiva.acepta }}
+        </span>
+      </label>
+
+      <!-- Archivo elegido -->
+      <div *ngIf="archivoSeleccionado" class="mt-5 flex items-center justify-between bg-gray-50 border border-gray-200 rounded px-4 py-3">
+        <div class="flex items-center gap-3 min-w-0">
+          <i class="pi text-[#004e82]" [ngClass]="opcionActiva.icono"></i>
+          <span class="text-sm text-gray-700 truncate">{{ archivoSeleccionado.name }}</span>
+        </div>
+        <button (click)="archivoSeleccionado = null; errorMensaje = ''"
+                class="text-xs text-gray-500 hover:text-red-600 ml-3 shrink-0">
+          <i class="pi pi-times"></i> Quitar
+        </button>
+      </div>
+
+      <div *ngIf="errorMensaje" class="mt-5 bg-red-50 border border-red-200 text-red-700 text-sm rounded px-4 py-3">
+        {{ errorMensaje }}
+      </div>
+
+      <div class="flex justify-end gap-2 mt-6">
+        <button (click)="cerrarApartadoImportacion()"
+                class="bg-[#e2e6e9] text-[#4a5568] px-6 py-2 rounded text-sm border border-transparent hover:border-gray-400 transition-all duration-200">
+          Cancelar
+        </button>
+        <button (click)="procesarArchivo()"
+                [disabled]="!archivoSeleccionado || cargando"
+                [ngClass]="!archivoSeleccionado || cargando
+                  ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                  : 'bg-[#004e82] text-white hover:bg-[#003a61]'"
+                class="px-6 py-2 rounded text-sm border border-transparent transition-all duration-200">
+          Leer extracto
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <ng-container *ngIf="!enApartadoDeImportacion">
   <!-- 1. Tarjeta de Filtros -->
   <div class="bg-white border border-gray-200 rounded p-4 mb-6 shadow-sm">
     <div class="flex justify-between items-center mb-4">
@@ -72,32 +174,12 @@
     <button (click)="cambiarTab('a_conciliar')"
             [ngClass]="tabActiva === 'a_conciliar' ? 'text-[#004e82] border-[#004e82] font-semibold' : 'text-gray-500 border-transparent hover:text-gray-700'"
             class="pb-2 text-sm border-b-2 transition-all">
-      Movimientos a conciliar (0)
+      Movimientos a conciliar ({{ totalConciliables }})
     </button>
     <button (click)="cambiarTab('conciliados')"
             [ngClass]="tabActiva === 'conciliados' ? 'text-[#004e82] border-[#004e82] font-semibold' : 'text-gray-500 border-transparent hover:text-gray-700'"
             class="pb-2 text-sm border-b-2 transition-all">
-      Movimientos conciliados (0)
-    </button>
-  </div>
-
-  <!-- Aviso: la importación vía Excel todavía no está soportada por el backend -->
-  <div
-    *ngIf="avisoExcel() as archivoExcel"
-    class="animate-aparecer-sube mb-4 flex items-center justify-between gap-4 rounded border border-amber-200 bg-[#fdf6e3] px-4 py-2.5 text-sm text-[#8a6d1f]"
-  >
-    <span class="flex items-center gap-2">
-      <i class="pi pi-exclamation-triangle text-xs"></i>
-      La importación vía Excel todavía no está disponible. Para este extracto usá
-      <span class="font-medium">Importar vía PDF</span>.
-    </span>
-    <button
-      type="button"
-      (click)="avisoExcel.set(null)"
-      class="flex h-6 w-6 shrink-0 items-center justify-center rounded text-[#8a6d1f] transition-colors duration-200 hover:bg-amber-100"
-      aria-label="Cerrar aviso"
-    >
-      <i class="pi pi-times text-xs"></i>
+      Movimientos conciliados ({{ conciliados.length }})
     </button>
   </div>
 
@@ -112,18 +194,31 @@
       Autoconciliar 🪄
     </button>
     
-<<<<<<< HEAD
-    <!-- Botón Importar con desplegable (Excel / PDF) -->
-    <app-importar-menu (excelSeleccionado)="avisoExcel.set($event)"></app-importar-menu>
-=======
-    <!-- Botón Importar: PDF, Excel o CSV -->
+    <!-- Botón Importar: menú con las dos vías (PDF o Excel/CSV) -->
     <div class="relative">
-      <input type="file" id="subirExtracto" (change)="capturarArchivo($event)" accept=".pdf,.xlsx,.xls,.csv" class="hidden">
-      <label for="subirExtracto" class="bg-[#e2e6e9] text-[#4a5568] px-4 py-1.5 rounded text-sm flex items-center gap-1 cursor-pointer border border-transparent hover:border-gray-400 hover:bg-[#d1d5db] transition-all duration-200">
-        Importar <i class="pi pi-chevron-down text-[10px] ml-1"></i>
-      </label>
+      <button (click)="alternarMenuImportar()"
+              class="bg-[#e2e6e9] text-[#4a5568] px-4 py-1.5 rounded text-sm flex items-center gap-1 border border-transparent hover:border-gray-400 hover:bg-[#d1d5db] transition-all duration-200">
+        Importar
+        <i class="pi text-[10px] ml-1" [ngClass]="menuImportarAbierto ? 'pi-chevron-up' : 'pi-chevron-down'"></i>
+      </button>
+
+      <!-- El menu se cierra si se clickea afuera: si no, tapa la botonera -->
+      <div *ngIf="menuImportarAbierto" (click)="menuImportarAbierto = false"
+           class="fixed inset-0 z-30"></div>
+
+      <div *ngIf="menuImportarAbierto"
+           class="absolute left-0 top-full mt-1 w-80 bg-white border border-gray-200 rounded shadow-lg z-40 overflow-hidden">
+        <button *ngFor="let opcion of opcionesImportacion"
+                (click)="elegirModo(opcion.modo)"
+                class="w-full text-left px-4 py-3 hover:bg-gray-50 flex items-start gap-3 transition-colors border-b border-gray-100 last:border-b-0">
+          <i class="pi text-[#004e82] mt-0.5" [ngClass]="opcion.icono"></i>
+          <span>
+            <span class="block text-sm text-gray-800 font-medium">{{ opcion.titulo }}</span>
+            <span class="block text-xs text-gray-500 mt-0.5">{{ opcion.detalle }}</span>
+          </span>
+        </button>
+      </div>
     </div>
->>>>>>> b58d3b94a0baa416951601d14742fe4893c230e8
     
     <button class="bg-[#e2e6e9] text-[#4a5568] px-4 py-1.5 rounded text-sm border border-transparent hover:border-gray-400 hover:bg-[#d1d5db] transition-all duration-200">
       Exportar
@@ -133,6 +228,11 @@
   <!-- Errores del backend: el motivo real, no un "ocurrió un error" -->
   <div *ngIf="errorMensaje" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded px-4 py-3 mb-6">
     {{ errorMensaje }}
+  </div>
+
+  <!-- Resultado del cruce, en pantalla y no en un alert -->
+  <div *ngIf="infoMensaje" class="bg-green-50 border border-green-200 text-green-800 text-sm rounded px-4 py-3 mb-6">
+    {{ infoMensaje }}
   </div>
 
   <!-- 4. Vista Dividida (Tablas) -->
@@ -163,12 +263,30 @@
         </div>
       </div>
 
-      <!-- Tabla de Datos o Estado Vacío -->
-      <div class="flex-1 flex items-center justify-center" *ngIf="movimientosBanco.length === 0">
-        <p class="text-gray-500 text-sm">Elegí los filtros para visualizar la información</p>
+      <!-- Toggle de percepciones e impuestos -->
+      <div class="flex items-center justify-between mb-3 pb-3 border-b border-gray-100"
+           *ngIf="totalNoOperativas > 0">
+        <label class="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+          <input type="checkbox" [(ngModel)]="mostrarNoOperativas" class="accent-blue-600">
+          <span>Mostrar percepciones e impuestos</span>
+        </label>
+        <span class="text-xs text-gray-400">
+          {{ totalNoOperativas }} de {{ filasBanco.length }} no son operaciones
+        </span>
       </div>
 
-      <div class="overflow-x-auto" *ngIf="movimientosBanco.length > 0">
+      <!-- Tabla de Datos o Estado Vacío -->
+      <div class="flex-1 flex items-center justify-center" *ngIf="filasBancoVisibles.length === 0">
+        <p class="text-gray-500 text-sm">
+          <ng-container *ngIf="filasBanco.length > 0; else sinMovimientos">
+            Todo lo que hay acá son percepciones o impuestos.
+            <button class="underline" (click)="mostrarNoOperativas = true">Mostrarlos</button>
+          </ng-container>
+          <ng-template #sinMovimientos>Elegí los filtros para visualizar la información</ng-template>
+        </p>
+      </div>
+
+      <div class="overflow-x-auto" *ngIf="filasBancoVisibles.length > 0">
         <table class="w-full text-xs text-left text-gray-600">
           <thead class="bg-gray-50 border-b border-gray-200">
             <tr>
@@ -179,9 +297,17 @@
             </tr>
           </thead>
           <tbody>
-            <tr *ngFor="let mov of movimientosBanco" class="border-b border-gray-100 hover:bg-gray-50 cursor-pointer">
+            <tr *ngFor="let mov of filasBancoVisibles"
+                class="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
+                [class.bg-amber-50]="mov.categoria === 'percepcion' || mov.categoria === 'impuesto'">
               <td class="px-3 py-2">{{ mov.fecha }}</td>
-              <td class="px-3 py-2">{{ mov.concepto }}</td>
+              <td class="px-3 py-2">
+                {{ mov.concepto }}
+                <span *ngIf="etiquetaCategoria(mov.categoria)"
+                      class="ml-1 px-1.5 py-0.5 rounded text-[10px] border border-amber-300 text-amber-700 bg-amber-100">
+                  {{ etiquetaCategoria(mov.categoria) }}
+                </span>
+              </td>
               <td class="px-3 py-2 text-right">{{ mov.debe > 0 ? mov.debe : '' }}</td>
               <td class="px-3 py-2 text-right">{{ mov.haber > 0 ? mov.haber : '' }}</td>
             </tr>
@@ -205,11 +331,11 @@
       </div>
 
       <!-- Estado Vacío -->
-      <div class="flex-1 flex items-center justify-center" *ngIf="movimientosXubio.length === 0">
+      <div class="flex-1 flex items-center justify-center" *ngIf="filasXubio.length === 0">
         <p class="text-gray-500 text-sm">Elegí los filtros para visualizar la información</p>
       </div>
 
-      <div class="overflow-x-auto" *ngIf="movimientosXubio.length > 0">
+      <div class="overflow-x-auto" *ngIf="filasXubio.length > 0">
         <table class="w-full text-xs text-left text-gray-600">
           <thead class="bg-gray-50 border-b border-gray-200">
             <tr>
@@ -220,7 +346,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr *ngFor="let mov of movimientosXubio" class="border-b border-gray-100 hover:bg-gray-50">
+            <tr *ngFor="let mov of filasXubio" class="border-b border-gray-100 hover:bg-gray-50">
               <td class="px-3 py-2">{{ mov.fecha }}</td>
               <td class="px-3 py-2">{{ mov.concepto }}</td>
               <td class="px-3 py-2 text-right">{{ mov.debe > 0 ? mov.debe : '' }}</td>
@@ -230,6 +356,7 @@
         </table>
       </div>
     </div>
-
   </div>
+  </ng-container>
+
 </div>

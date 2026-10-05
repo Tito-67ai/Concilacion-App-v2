@@ -1,16 +1,9 @@
 import pdfplumber
 import pandas as pd
 import re
-import sys
-import os
 
-# Configuración de rutas para importar Tools
-carpeta_padre = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(carpeta_padre)
-
-# Importamos las herramientas existentes
-# Usaremos es_formato_ingles=True para que acepte el punto como decimal
-from Tools import limpiar_numero, guardar_excel, TrackerSaldo
+# limpiar_numero con es_formato_ingles=True para que acepte el punto como decimal
+from app.services.Tools import limpiar_numero, guardar_excel, TrackerSaldo
 
 def extraer_provincia(pdf_path, excel_path, log_callback):
     """
@@ -91,13 +84,17 @@ def extraer_provincia(pdf_path, excel_path, log_callback):
                                     detalle = " ".join(partes[1:-3])
 
                                 # Lógica DEBE / HABER
-                                # En este extracto: Negativo disminuye saldo (DEBE), Positivo aumenta (HABER)
+                                # El importe negativo es plata que SALE de la
+                                # cuenta, y el DEBE es la salida en este proyecto.
+                                # El signo va al DEBE: antes el comentario de acá
+                                # decía "(DEBE)" y las dos lineas de abajo lo
+                                # mandaban al HABER.
                                 if valor_importe < 0:
-                                    debe = 0.0
-                                    haber = abs(valor_importe)
-                                else:
                                     debe = abs(valor_importe)
                                     haber = 0.0
+                                else:
+                                    debe = 0.0
+                                    haber = abs(valor_importe)
 
                                 filas.append({
                                     "FECHA": fecha,
@@ -142,8 +139,8 @@ def generar_excel_provincia(filas, excel_path, log_callback):
             df.at[i, "FECHA"] = ""
             continue
         
-        # Fórmula: SaldoAnterior + Haber - Debe
-        formula = f"=E{fila_excel-1}+C{fila_excel}-D{fila_excel}"
+        # Fórmula: SaldoAnterior - Debe + Haber
+        formula = f"=E{fila_excel-1}-C{fila_excel}+D{fila_excel}"
         df.at[i, "SALDO"] = formula
 
     return guardar_excel(df, excel_path)

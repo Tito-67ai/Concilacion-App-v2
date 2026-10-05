@@ -20,17 +20,12 @@ Tres cosas que rompen un parser general:
    trae signo. Hay que deducir la direccion del saldo de la linea.
 """
 
-import os
 import re
-import sys
 
 import pandas as pd
 import pdfplumber
 
-carpeta_padre = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(carpeta_padre)
-
-from Tools import TrackerSaldo, guardar_excel, limpiar_numero
+from app.services.Tools import TrackerSaldo, guardar_excel, limpiar_numero
 
 # dd-mm al comienzo de la linea
 RE_FECHA = re.compile(r"^(\d{2})-(\d{2})\b")
@@ -220,7 +215,14 @@ def _armar_filas(filas, saldo_inicial):
         # Con dos numeros: el primero es el movimiento y el segundo el saldo.
         # Con uno: solo el movimiento, el saldo no viene.
         if len(importes) >= 2:
-            (_, importe, negativo), (_, saldo_linea, _) = importes[0], importes[-1]
+            (_, importe, negativo) = importes[0]
+            (_, saldo_linea, saldo_negativo) = importes[-1]
+            # El saldo tambien viene con el signo pegado al final
+            # ("136.683,66-"). Sin aplicarlo, una cuenta que queda en negativo se
+            # leia positiva: TrackerSaldo no podia deducir la direccion, la cadena
+            # de saldos se rompia y la auditoria de descuadre "-" que lo delata.
+            if saldo_negativo:
+                saldo_linea = -saldo_linea
         else:
             importe = importes[0][1]
             negativo = importes[0][2]

@@ -1,16 +1,8 @@
 import pdfplumber # Librería para abrir y extraer texto de archivos PDF
 import pandas as pd # Librería para crear y manipular tablas de datos (DataFrames)
 import re # Librería de Expresiones Regulares (Regex) para buscar patrones de texto
-import sys # Funciones del sistema (para manipular la forma en que Python ejecuta archivos)
-import os # Funciones del sistema operativo (para leer rutas de carpetas y archivos)
 
-# Obtenemos la ruta de la "carpeta padre" (una carpeta atrás de donde estamos ahora)
-carpeta_padre = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# Le decimos a Python que también busque archivos (como nuestras Tools) en esa carpeta padre
-sys.path.append(carpeta_padre)
-
-# Importamos nuestras funciones personalizadas desde el archivo Tools.py
-from Tools import limpiar_numero, TrackerSaldo, guardar_excel
+from app.services.Tools import limpiar_numero, TrackerSaldo, guardar_excel
 
 def extraer_cmf(pdf_path, excel_path, log_callback):
     """
@@ -229,10 +221,12 @@ def generar_excel_cmf(filas, excel_path, log_callback):
                  df.at[i, "FECHA"] = ""
              continue # Pasamos a la siguiente iteración del bucle
         else:
-            # Para todas las demás filas, calculamos: Saldo de arriba + Entrada - Salida
-            # OJO: Asumimos que D=Debe, E=Haber, F=Saldo. (Verifica si tus letras coinciden)
+            # Para todas las demás filas: Saldo de arriba - Debe + Haber.
+            # Las letras SIEMPRE son D=Debe, E=Haber, F=Saldo con este orden de
+            # columnas. Antes la formula restaba el HABER y suma el DEBE, al
+            # reves de lo que hace el procesador.
             fila_excel_anterior = fila_excel_actual - 1
-            formula = f"=F{fila_excel_anterior}-E{fila_excel_actual}+D{fila_excel_actual}"
+            formula = f"=F{fila_excel_anterior}-D{fila_excel_actual}+E{fila_excel_actual}"
             
             # Escribimos la fórmula (como si la tecleáramos) en la celda correspondiente
             df.at[i, "SALDO"] = formula

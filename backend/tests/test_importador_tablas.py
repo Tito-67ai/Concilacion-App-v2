@@ -17,6 +17,7 @@ Cada caso que se rompio deberia tener un test que lo vuelva a romper.
 
 from datetime import date
 from pathlib import Path
+import re
 
 import pandas as pd
 import pytest
@@ -137,18 +138,19 @@ def test_xlsx_con_los_nombres_canonicos_entra_tal_cual(tmp_path):
 
     movimientos = procesar_tabla("BBVA", str(ruta))
 
-    # La fila de saldo inicial sale como movimiento con DEBE y HABER en cero, que
-    # es el contrato de _df_to_movimientos. Lo que importa aca es que la cadena de
-    # saldos cierre y que las fechas se lean bien.
+    # La fila de saldo inicial siembra la cadena pero no sale como movimiento:
+    # con DEBE y HABER en cero nunca cruzaria con Xubio. Lo que importa aca es
+    # que la cadena de saldos cierre desde 1000 y que las fechas se lean bien.
     assert [m.concepto for m in movimientos] == [
-        "SALDO INICIAL",
         "Pago luz",
         "Cobro cliente",
     ]
-    assert movimientos[0].saldo == pytest.approx(1000.0)
-    assert movimientos[1].fecha == date(2026, 7, 2)
-    assert movimientos[1].saldo == pytest.approx(600.0)
-    assert movimientos[2].saldo == pytest.approx(850.0)
+    assert movimientos[0].fecha == date(2026, 7, 2)
+    assert movimientos[0].saldo == pytest.approx(600.0)
+    assert movimientos[1].saldo == pytest.approx(850.0)
+    # El saldo de apertura se deduce del primer movimiento.
+    primero = movimientos[0]
+    assert primero.saldo + primero.debe - primero.haber == pytest.approx(1000.0)
 
 
 def test_columnas_del_portal_bancario_se_normalizan(tmp_path):
@@ -335,19 +337,29 @@ def test_bancos_soportados_informan_los_formatos(client):
 def test_el_frontend_acepta_los_cuatro_formatos():
     # Si el input no declara .xls, el usuario no puede seleccionar el archivo
     # aunque el backend lo sepa leer.
-    html = (
-        Path(__file__).resolve().parents[2]
-        / "frontend"
-        / "src"
-        / "app"
-        / "pantallas"
-        / "conciliacion"
-        / "conciliacion.html"
-    )
-    if not html.exists():
+    #
+    # Los accept viven en el TS desde que el boton Importar se abrio en dos vias
+    # (PDF y Excel/CSV). La guarda busca las declaraciones "acepta: '...'" y no
+    # una busqueda de texto libre: los nombres de los formatos aparecen
+    # tambien en los mensajes de error de la pantalla, asi que un "in" a secas
+    # daria verde aunque el accept no los tuviera.
+    raiz = Path(__file__).resolve().parents[2]
+    fuente = raiz / "frontend" / "src" / "app" / "pantallas" / "conciliacion"
+    if not (fuente / "conciliacion.ts").exists():
         pytest.skip("el frontend no esta en este checkout")
 
-    assert 'accept=".pdf,.xlsx,.xls,.csv"' in html.read_text(encoding="utf-8")
+    codigo = (fuente / "conciliacion.ts").read_text(encoding="utf-8")
+    declarados = set()
+    for accept in re.findall(r"acepta:\s*'([^']+)'", codigo):
+        declarados.update(acepta.strip() for acepta in accept.split(","))
+
+    assert declarados, "no se encontro ninguna declaracion 'acepta:' en el frontend"
+
+    for extension in (".pdf", ".xlsx", ".xls", ".csv"):
+        assert extension in declarados, (
+            f"{extension} se lee en el backend pero el frontend no lo ofrece. "
+            f"Declarados: {sorted(declarados)}"
+        )
 
 
 def test_extension_no_soportada_en_la_ruta(client):

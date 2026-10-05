@@ -17,10 +17,12 @@ entorno PDF_BANCO_TEST con la ruta y BANCO_TEST con el codigo del banco.
 
 import base64
 import os
+import re
 from datetime import date
 
 import pandas as pd
 import pytest
+from openpyxl import load_workbook
 
 from app.models.schemas import MovimientoBancario
 from app.services.Tools import TrackerSaldo, es_numero_bancario, limpiar_numero
@@ -216,14 +218,62 @@ def test_saldo_se_recalcula_a_partir_de_debe_y_haber():
     )
     movimientos = _df_to_movimientos(_roundtrip(df), "TEST")
 
+    # La fila de saldo inicial no se emite: solo siembra la cadena. Lo que se
+    # verifica es que el saldo de apertura (100000) se aplico bien.
     # 100000 - 25000 + 10000 - 80000 = 5000
-    assert [m.saldo for m in movimientos] == [100000.0, 75000.0, 85000.0, 5000.0]
+    assert [m.saldo for m in movimientos] == [75000.0, 85000.0, 5000.0]
     assert movimientos[-1].fecha == date(2026, 7, 4)
 
 
-def test_saldo_inicial_toma_la_fecha_del_primer_movimiento():
-    # El saldo inicial no tiene fecha propia. Antes se le ponia la fecha de hoy,
-    # que hacia que un extracto de julio pareciera de octubre.
+def test_la_fila_de_saldo_inicial_no_se_emite_como_movimiento():
+    """
+    La fila de saldo inicial no es un movimiento: no tiene DEBE ni HABER y nunca
+    va a cruzar con Xubio, asi que emitirla deja una fila 0/00 perpetua en la
+    bandeja de pendientes. El saldo de apertura sigue disponible yendo al
+    primer movimiento y desandolo.
+    """
+    df = pd.DataFrame(
+        [
+            {"FECHA": "", "DETALLE": "SALDO ULTIMO EXTRACTO AL 30/06/2026",
+             "DEBE": 0.0, "HABER": 0.0, "SALDO": 5000.0},
+            {"FECHA": "15/08/2026", "DETALLE": "Transferencia", "DEBE": 0.0,
+             "HABER": 1000.0, "SALDO": "=E2+C3-D3"},
+            {"FECHA": "16/08/2026", "DETALLE": "Pago", "DEBE": 500.0,
+             "HABER": 0.0, "SALDO": "=E3+C4-D4"},
+        ]
+    )
+    movimientos = _df_to_movimientos(_roundtrip(df), "TEST")
+
+    assert [m.concepto for m in movimientos] == ["Transferencia", "Pago"]
+    assert [m.saldo for m in movimientos] == [6000.0, 5500.0]
+    # El saldo de apertura se sigue pudiendo deducir del primer movimiento.
+    primero = movimientos[0]
+    assert primero.saldo + primero.debe - primero.haber == pytest.approx(5000.0)
+
+
+def test_una_fila_marcada_como_saldo_inicial_con_importe_es_un_movimiento():
+    """
+    Si un banco marca la fila de saldo inicial pero le pone un importe, el
+    importe manda: la fila es un movimiento real y descartarla seria perder
+    plata del extracto.
+    """
+    df = pd.DataFrame(
+        [
+            {"FECHA": "02/07/2026", "DETALLE": "SALDO INICIAL", "DEBE": 250.0,
+             "HABER": 0.0, "SALDO": "=E2+C3-D3"},
+        ]
+    )
+    movimientos = _df_to_movimientos(_roundtrip(df), "TEST")
+
+    assert len(movimientos) == 1
+    assert movimientos[0].debe == pytest.approx(250.0)
+
+
+def test_la_fila_de_saldo_inicial_no_inventa_la_fecha_de_hoy():
+    # El saldo inicial no tiene fecha propia y antes se le ponia la fecha de
+    # hoy, que hacia que un extracto de julio pareciera de octubre. Hoy la fila
+    # no se emite, asi que el problema es estructuralmente imposible: lo que
+    # queda es que ningun movimiento tome una fecha que no sea la suya.
     df = pd.DataFrame(
         [
             {"FECHA": "", "DETALLE": "SALDO INICIAL", "DEBE": 0.0,
@@ -233,8 +283,8 @@ def test_saldo_inicial_toma_la_fecha_del_primer_movimiento():
         ]
     )
     movimientos = _df_to_movimientos(_roundtrip(df), "TEST")
-    assert movimientos[0].fecha == date(2026, 8, 15)
-    assert movimientos[0].concepto == "SALDO INICIAL"
+
+    assert [m.fecha for m in movimientos] == [date(2026, 8, 15)]
 
 
 def test_saldo_no_drift_con_centavos():
@@ -267,10 +317,10 @@ def test_columna_importe_con_signo_de_mercadopago():
     )
     movimientos = _df_to_movimientos(_roundtrip(df), "MP")
 
-    assert movimientos[1].haber == 5000.0 and movimientos[1].debe == 0.0
-    assert movimientos[2].debe == 1500.0 and movimientos[2].haber == 0.0
-    assert movimientos[1].referencia == "12345"
-    assert [m.saldo for m in movimientos] == [30000.0, 35000.0, 33500.0]
+    assert movimientos[0].haber == 5000.0 and movimientos[0].debe == 0.0
+    assert movimientos[1].debe == 1500.0 and movimientos[1].haber == 0.0
+    assert movimientos[0].referencia == "12345"
+    assert [m.saldo for m in movimientos] == [35000.0, 33500.0]
 
 
 def test_error_cuando_ninguna_fila_tiene_fecha():
@@ -388,9 +438,19 @@ def test_cruce_con_listas_vacias():
 
 
 def test_el_cruce_no_mezcla_centavos():
+    # El cruce con el mayor de Xubio exige el centimo exacto: si el banco y la
+    # contabilidad no dicen lo mismo, la diferencia tiene que quedar a la vista
+    # en las bandejas de pendientes. Ojo que esto es distinto del redondeo que
+    # tolera TrackerSaldo al leer el extracto, que solo deduce el signo de cada
+    # linea y por eso puede perdonar un centavo.
     banco = [_mov(date(2026, 7, 1), debe=1000.0)]
     xubio = [{"fecha": "2026-07-01", "concepto": "Distinto", "debe": 0.0, "haber": 1000.01}]
-    assert conciliar_movimientos(banco, xubio)["conciliados"] == []
+    resultado = conciliar_movimientos(banco, xubio)
+
+    assert resultado["conciliados"] == []
+    # Y no se pierde ninguno de los dos: cada uno cae en su bandeja.
+    assert len(resultado["pendientes_banco"]) == 1
+    assert len(resultado["pendientes_xubio"]) == 1
 
 
 def test_importe_con_signo_del_banco():
@@ -402,6 +462,48 @@ def test_importe_con_signo_del_banco():
     assert conciliar_movimientos(
         [_mov(date(2026, 7, 1), haber=100.0)], []
     )["pendientes_banco"][0]["importe"] == 100.0
+
+
+def test_la_convencion_de_debe_y_haber_no_se_puede_invertir():
+    """
+    Este es el contrato que tienen que cumplir los 11 extractores.
+
+    DEBE es la plata que SALE de la cuenta y HABER la que ENTRA. No es una
+    cuestion de gusto: el conciliador arma el importe del banco como
+    haber - debe, asi que si un extractor manda el signo al reves, un pago del
+    banco aparece como un ingreso, no cruza nunca con el mayor de Xubio y el
+    extracto entero queda en la bandeja de pendientes sin avisar.
+
+    BBK, ICBC, HIPO y PBA mandaban el signo al reves y quedaron arreglados. Este
+    test es el que dice cual es el lado correcto; cuando aparezca un PDF real de
+    alguno de esos bancos, el test del extractor mas el descuadre del
+    procesador lo confirman.
+
+    Las dos formas son validas: dos columnas (DEBE/HABER) o una sola columna
+    IMPORTE con el signo puesto, que es como viene Mercado Pago.
+    """
+    from app.services.procesador_central import _importes
+
+    dos_columnas = pd.DataFrame([{"DEBE": 100.0, "HABER": 0.0}])
+    assert _importes(dos_columnas.iloc[0]) == (100.0, 0.0)
+
+    dos_columnas_entra = pd.DataFrame([{"DEBE": 0.0, "HABER": 100.0}])
+    assert _importes(dos_columnas_entra.iloc[0]) == (0.0, 100.0)
+
+    # Una sola columna con signo: el negativo es plata que sale.
+    una_columna_sale = pd.DataFrame([{"IMPORTE": -100.0}])
+    assert _importes(una_columna_sale.iloc[0]) == (100.0, 0.0)
+
+    una_columna_entra = pd.DataFrame([{"IMPORTE": 100.0}])
+    assert _importes(una_columna_entra.iloc[0]) == (0.0, 100.0)
+
+    # Y el signo unificado del banco sale de ahi: DEBE resta, HABER suma.
+    assert conciliar_movimientos(
+        [_mov(date(2026, 7, 1), debe=100.0)], []
+    )["pendientes_banco"][0]["importe"] < 0
+    assert conciliar_movimientos(
+        [_mov(date(2026, 7, 1), haber=100.0)], []
+    )["pendientes_banco"][0]["importe"] > 0
 
 
 # --------------------------------------------------------------------------
@@ -511,6 +613,12 @@ def _fila_mov2(detalle, debe, haber, con_cuenta=True):
 # de columna distintos, asi que las fixtures reproducen lo que cada extractor
 # arma de verdad. Si uno cambia ese contrato, el test lo dice con el banco y la
 # fila, no con un error generico de pandas.
+#
+# Los saldos esperados arrancan en el saldo ya aplicado del primer movimiento,
+# no en el saldo de apertura: la fila de saldo inicial no se emite como
+# movimiento (no tiene DEBE ni HABER, nunca cruzaria con Xubio) pero si sembrar
+# la cadena. Galicia es el unico que no trae esa fila, y por eso su lista
+# arranca en el saldo de su primer movimiento.
 GENERADORES = [
     (
         "BBK",
@@ -523,14 +631,14 @@ GENERADORES = [
             {"CUENTA": "1", "FECHA": "03/07/2026", "REFERENCIA": "78", "DETALLE": "Venta",
              "DEBE": 0.0, "HABER": 500.0, "SALDO_CALC": 0.0},
         ],
-        [5000.0, 4000.0, 4500.0],
+        [4000.0, 4500.0],
     ),
     ("BBVA", BcoBBVA.generar_excel_bbva,
      [_fila_ini("SALDO ANTERIOR (Automatico)"), _fila_mov("Compra", 1000.0, 0.0), _fila_mov2("Venta", 0.0, 500.0)],
-     [5000.0, 4000.0, 4500.0]),
+     [4000.0, 4500.0]),
     ("CMF", BcoCMF.generar_excel_cmf,
      [_fila_ini("SALDO ANTERIOR (Automatico)"), _fila_mov("Compra", 1000.0, 0.0), _fila_mov2("Venta", 0.0, 500.0)],
-     [5000.0, 4000.0, 4500.0]),
+     [4000.0, 4500.0]),
     ("GAL", BcoGAL.generar_excel_galicia,
      # Galicia no emite fila de saldo inicial: imprime el saldo de cada linea
      [{"FECHA": "02/07/2026", "DETALLE": "Compra", "DEBE": 1000.0, "HABER": 0.0, "SALDO": 4000.0},
@@ -538,13 +646,13 @@ GENERADORES = [
      [4000.0, 4500.0]),
     ("HIPO", BcoHIPO.generar_excel_hipotecario,
      [_fila_ini("SALDO INICIAL", False), _fila_mov("Compra", 1000.0, 0.0, False), _fila_mov2("Venta", 0.0, 500.0, False)],
-     [5000.0, 4000.0, 4500.0]),
+     [4000.0, 4500.0]),
     ("ICBC", BcoICBC.generar_excel_icbc,
      [{"FECHA": "INICIO", "DETALLE": "SALDO ANTERIOR (Automatico)", "DEBE": 0.0,
        "HABER": 0.0, "SALDO_CALC": 5000.0},
       {"FECHA": "02/07/2026", "DETALLE": "Compra", "DEBE": 1000.0, "HABER": 0.0, "SALDO_CALC": 0.0},
       {"FECHA": "03/07/2026", "DETALLE": "Venta", "DEBE": 0.0, "HABER": 500.0, "SALDO_CALC": 0.0}],
-     [5000.0, 4000.0, 4500.0]),
+     [4000.0, 4500.0]),
     ("MP", BcoMP.generar_excel_mp,
      [{"FECHA": "INICIO", "DETALLE": "SALDO ANTERIOR (Automatico)", "ID_OPERACION": "-",
        "IMPORTE": 0.0, "SALDO_CALC": 5000.0},
@@ -552,16 +660,16 @@ GENERADORES = [
        "IMPORTE": 1000.0, "SALDO_CALC": 0.0},
       {"FECHA": "03/07/2026", "DETALLE": "Pago", "ID_OPERACION": "1000",
        "IMPORTE": -500.0, "SALDO_CALC": 0.0}],
-     [5000.0, 6000.0, 5500.0]),
+     [6000.0, 5500.0]),
     ("PBA", BcoPBA.generar_excel_provincia,
      [_fila_ini("SALDO ANTERIOR", False), _fila_mov("Compra", 1000.0, 0.0, False), _fila_mov2("Venta", 0.0, 500.0, False)],
-     [5000.0, 4000.0, 4500.0]),
+     [4000.0, 4500.0]),
     ("RIO", BcoRIO.generar_excel_santander,
      [_fila_ini("SALDO INICIAL"), _fila_mov("Compra", 1000.0, 0.0), _fila_mov2("Venta", 0.0, 500.0)],
-     [5000.0, 4000.0, 4500.0]),
+     [4000.0, 4500.0]),
     ("SUPV", BcoSUPV.generar_excel_supervielle,
      [_fila_ini("SALDO ANTERIOR"), _fila_mov("Compra", 1000.0, 0.0), _fila_mov2("Venta", 0.0, 500.0)],
-     [5000.0, 4000.0, 4500.0]),
+     [4000.0, 4500.0]),
 ]
 
 
@@ -600,6 +708,97 @@ def test_saldos_de_cada_generador(nombre, generador, filas, esperado, tmp_path):
 
     movimientos = _df_to_movimientos(pd.read_excel(ruta), nombre)
     assert [round(m.saldo, 2) for m in movimientos] == esperado, nombre
+
+
+# --------------------------------------------------------------------------
+# La formula de Excel tiene que decir lo mismo que el procesador
+# --------------------------------------------------------------------------
+
+
+def _letra_excel(indice: int) -> str:
+    """0 -> A, 1 -> B, ... para armar las referencias de celda."""
+    letras = ""
+    indice += 1
+    while indice:
+        indice, resto = divmod(indice - 1, 26)
+        letras = chr(65 + resto) + letras
+    return letras
+
+
+_REF_CELDA = re.compile(r"\b([A-Z]{1,2})(\d+)\b")
+
+
+def _evaluar_formula(formula: str, celdas: dict, profundidad: int = 0) -> float:
+    """
+    Resuelve una formula del Excel del tipo '=G2-E3+F3' con los valores del
+    libro. Resuelve recursivamente porque la fila N usa el saldo de la N-1, que
+    tambien es formula.
+    """
+    if profundidad > 20:
+        raise AssertionError("referencias circulares en la formula de SALDO")
+
+    def reemplazar(match):
+        clave = (match.group(1), int(match.group(2)))
+        valor = celdas.get(clave, 0.0)
+        if isinstance(valor, str) and valor.startswith("="):
+            valor = _evaluar_formula(valor.lstrip("="), celdas, profundidad + 1)
+        return repr(float(valor or 0.0))
+
+    return float(eval(_REF_CELDA.sub(reemplazar, formula.lstrip("="))))
+
+
+@pytest.mark.parametrize(
+    "nombre, generador, filas, esperado",
+    GENERADORES,
+    ids=[c[0] for c in GENERADORES],
+)
+def test_la_formula_de_excel_no_contradice_al_procesador(
+    nombre, generador, filas, esperado, tmp_path
+):
+    """
+    La columna SALDO del xlsx es una formula que openpyxl nunca evalua: el
+    procesador recalcula el saldo desde DEBE y HABER. O sea que la formula es
+    letra muerta para el sistema... pero el archivo igual se abre en Excel y ahi
+    se ve.
+
+    Con laformula al reves (+DEBE -HABER) el xlsx de BBK, ICBC, HIPO, PBA y
+    SUPV decia que un pago de 1.000 hacia SUBIR el saldo de 5.000 a 6.000,
+    justo al contrario de lo que el sistema calcula. Este test evalua la formula
+    con los valores reales y la compara contra los mismos saldos que espera el
+    procesador: si divergen, el archivo esta mintiendo.
+    """
+    ruta = str(tmp_path / f"{nombre}_formula.xlsx")
+    ok, resultado = generador(filas, ruta, lambda m: None)
+    assert ok, f"{nombre}: {resultado}"
+
+    # data_only=False es lo unico que trae el texto de la formula; con
+    # data_only=True (el default de pandas) vuelve vacio.
+    libro = load_workbook(ruta, data_only=False)
+    hoja = libro.active
+
+    celdas = {
+        (_letra_excel(c.column - 1), c.row): c.value
+        for fila in hoja.iter_rows()
+        for c in fila
+    }
+
+    columna_saldo = [c.column for c in hoja[1] if c.value == "SALDO"]
+    assert columna_saldo, f"{nombre}: el xlsx no tiene columna SALDO"
+    letra_saldo = _letra_excel(columna_saldo[0] - 1)
+
+    formulas = [
+        celdas[(letra_saldo, fila)]
+        for fila in range(2, hoja.max_row + 1)
+        if isinstance(celdas.get((letra_saldo, fila)), str)
+        and str(celdas[(letra_saldo, fila)]).startswith("=")
+    ]
+
+    if not formulas:
+        # Galicia y Santander traen el saldo ya impreso en el PDF.
+        return
+
+    evaluados = [round(_evaluar_formula(f, celdas), 2) for f in formulas]
+    assert evaluados == esperado, f"{nombre}: la formula del xlsx no cierra igual"
 
 
 # --------------------------------------------------------------------------

@@ -131,7 +131,13 @@ def _leer_pdf(banco_id, ruta_pdf):
             raise HTTPException(status_code=422, detail=motivo)
         if fallback_error is not None:
             raise fallback_error
-        return movimientos, banco_id
+        # Se devuelve una lista vacia y no None: el llamador cuenta los
+        # movimientos con len() y un None aca terminaba en un TypeError sin
+        # mensaje, que el usuario veia como un 500 opaco.
+        logger.error(
+            "Ni el parser de %s ni el motor generico leiaron el PDF", banco_id
+        )
+        return [], banco_id
     logger.info("El motor generico leyo %d movimientos de %s", len(rescued), banco_id)
     return rescued, "GENERICO"
 

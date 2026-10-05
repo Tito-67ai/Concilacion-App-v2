@@ -1,16 +1,8 @@
 import pdfplumber
 import pandas as pd
 import re
-import sys
-import os
 
-# Configuración de ruta para importar Tools
-carpeta_padre = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(carpeta_padre)
-
-# Importamos Tools.
-# IMPORTANTE: Asegúrate de que tu Tools.py tenga el parámetro es_formato_ingles en limpiar_numero
-from Tools import es_numero_bancario, limpiar_numero, guardar_excel
+from app.services.Tools import es_numero_bancario, limpiar_numero, guardar_excel
 
 def extraer_hipotecario(pdf_path, excel_path, log_callback):
     """
@@ -110,22 +102,35 @@ def extraer_hipotecario(pdf_path, excel_path, log_callback):
                         # Como pdfplumber a veces pega las columnas, usamos palabras clave para decidir.
                         
                         desc_temp = linea_upper
-                        
-                        es_credito = False # Por defecto asumimos Débito (gastos), salvo que...
-                        
-                        # Palabras que indican ENTRADA de dinero (Crédito)
+
+                        # Este PDF no trae el signo del importe pegado, asi que
+                        # hay que adivinar la direccion por palabras. Lo que NO
+                        # se puede cambiar es la polaridad: el HABER es la plata
+                        # que entra y el DEBE la que sale, como en todos los
+                        # bancos del proyecto. Antes un DEPOSITO (que entra)
+                        # iba al DEBE y cualquier otra cosa al HABER, o sea al
+                        # reves: el conciliador calcula haber - debe, con lo cual
+                        # los pagos aparecian como ingresos y no cruzaban con
+                        # Xubio.
+                        #
+                        # Ojo: el acierto de la heuristica en si (que la palabra
+                        # detectada sea la correcta para cada banco) no se puede
+                        # verificar sin un PDF real del Hipotecario.
+                        es_credito = False # Por defecto asumimos que sale plata
+
+                        # Palabras que indican ENTRADA de dinero
                         keywords_credito = ["DEPOSITO", "ACRED", "CREDITO", "N/C", "TRANSF REC","CR TRANSF"]
-                        
+
                         if any(kw in desc_temp for kw in keywords_credito):
                             es_credito = True
-                        
+
                         # Asignación
                         if es_credito:
-                            debe = valor_abs
-                            haber = 0.0
-                        else:
                             debe = 0.0
                             haber = valor_abs
+                        else:
+                            debe = valor_abs
+                            haber = 0.0
 
                         # --- LIMPIEZA DE DESCRIPCIÓN ---
                         # Tomamos todo desde la fecha hasta el primer número
@@ -173,8 +178,9 @@ def generar_excel_hipotecario(filas, excel_path, log_callback):
             continue 
         else:
             fila_excel_anterior = fila_excel - 1
-            # Fórmula estándar: SaldoAnterior + Haber (Entra) - Debe (Sale)
-            formula = f"=E{fila_excel_anterior}+C{fila_excel}-D{fila_excel}"
+            # DEBE es la salida, HABER la entrada:
+            # SaldoAnterior - Debe + Haber
+            formula = f"=E{fila_excel_anterior}-C{fila_excel}+D{fila_excel}"
             df.at[i, "SALDO"] = formula
 
     return guardar_excel(df, excel_path)

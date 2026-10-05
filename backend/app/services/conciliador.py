@@ -2,10 +2,10 @@ import logging
 from decimal import Decimal
 
 from app.models.schemas import MovimientoBancario
+from app.services.clasificacion import clasificar, resumir_categorias
 
 logger = logging.getLogger(__name__)
 
-TOLERANCIA_CENTIMOS = Decimal("0.01")
 TOLERANCIA_DIAS = 3
 
 
@@ -47,10 +47,6 @@ def _a_fecha(valor):
     return None
 
 
-def _monto_exacto(a: Decimal, b: Decimal) -> bool:
-    return abs(a - b) <= TOLERANCIA_CENTIMOS
-
-
 def conciliar_movimientos(
     movimientos_banco: list[MovimientoBancario],
     movimientos_xubio: list[dict],
@@ -66,6 +62,14 @@ def conciliar_movimientos(
 
     Ademas el cruce es uno a uno: un movimiento del banco no puede quedar
     emparejado con dos de Xubio ni al reves.
+
+    El importe tiene que coincidir AL CENTIMO. Una diferencia de un centavo sale
+    en las dos bandejas de pendientes en vez de conciliar sola, y eso es lo que
+    se quiere: si el banco y el sistema contable no dicen lo mismo, que un
+    humano lo mire. Automatizar ese cruce esconderia una diferencia real de
+    contabilidad. (El redondeo del banco si se tolera, pero en otra parte: es lo
+    que hace TrackerSaldo al deducir el signo de cada linea del extracto, que
+    solo necesita orientarse y no decide si dos transacciones son la misma.)
 
     Devuelve las tres bandejas: conciliados, pendientes_banco y pendientes_xubio.
     """
@@ -87,6 +91,10 @@ def conciliar_movimientos(
                 "haber": float(m.haber),
                 "saldo": float(m.saldo),
                 "importe": float(importe),
+                # getAttribute no, es un modelo: la categoria la cargo el
+                # procesador al armar el movimiento. El fallback es para cuando
+                # alguien arma un MovimientoBancario a mano y se olvida.
+                "categoria": getattr(m, "categoria", None) or clasificar(m.concepto),
             }
         )
         indice_banco.setdefault(importe, []).append(i)
@@ -104,7 +112,12 @@ def conciliar_movimientos(
     ]
 
     if not banco or not xubio:
-        return {"conciliados": [], "pendientes_banco": banco, "pendientes_xubio": xubio}
+        return {
+            "conciliados": [],
+            "pendientes_banco": banco,
+            "pendientes_xubio": xubio,
+            "categorias": resumir_categorias(banco),
+        }
 
     usados = set()
     usados_xubio = set()
@@ -162,6 +175,7 @@ def conciliar_movimientos(
                 "haber": mov_b["haber"],
                 "saldo": mov_b["saldo"],
                 "importe": mov_b["importe"],
+                "categoria": mov_b["categoria"],
                 "cuadra": True,
             }
         )
@@ -169,15 +183,24 @@ def conciliar_movimientos(
     pendientes_banco = [mov for i, mov in enumerate(banco) if i not in usados]
     pendientes_xubio = [mov for i, mov in enumerate(xubio) if i not in usados_xubio]
 
+    conteo = resumir_categorias(banco)
+
     logger.info(
         "Cruce: %d conciliados, %d del banco sin cruce, %d de Xubio sin cruce",
         len(conciliados),
         len(pendientes_banco),
         len(pendientes_xubio),
     )
+    logger.info(
+        "Del banco: %d operativos, %d percepciones, %d impuestos",
+        conteo["operativo"],
+        conteo["percepcion"],
+        conteo["impuesto"],
+    )
 
     return {
         "conciliados": conciliados,
         "pendientes_banco": pendientes_banco,
         "pendientes_xubio": pendientes_xubio,
+        "categorias": conteo,
     }

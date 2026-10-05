@@ -1,14 +1,8 @@
 import pdfplumber
 import pandas as pd
 import re
-import sys
-import os
 
-# Configuración de rutas para importar Tools
-carpeta_padre = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(carpeta_padre)
-
-from Tools import es_numero_bancario, limpiar_numero, TrackerSaldo, guardar_excel
+from app.services.Tools import es_numero_bancario, limpiar_numero, TrackerSaldo, guardar_excel
 
 def extraer_supervielle(pdf_path, excel_path, log_callback):
     """
@@ -194,7 +188,9 @@ def generar_excel_supervielle(filas, excel_path, log_callback):
             continue 
         else:
             fila_excel_anterior = fila_excel_actual - 1
-            formula = f"=F{fila_excel_anterior}+D{fila_excel_actual}-E{fila_excel_actual}"
+            # SaldoAnterior - Debe + Haber. Esta formula estaba al reves
+            # (+DEBE -HABER) y hacia crecer el saldo con cada pago.
+            formula = f"=F{fila_excel_anterior}-D{fila_excel_actual}+E{fila_excel_actual}"
             df.at[i, "SALDO"] = formula
 
     return guardar_excel(df, excel_path)

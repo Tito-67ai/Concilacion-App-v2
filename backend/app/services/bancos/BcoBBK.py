@@ -1,14 +1,8 @@
 import pdfplumber
 import pandas as pd
 import re
-import sys
-import os
 
-# Configuración de rutas para importar Tools
-carpeta_padre = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(carpeta_padre)
-
-from Tools import limpiar_numero, guardar_excel
+from app.services.Tools import limpiar_numero, guardar_excel
 
 def extraer_brubank(pdf_path, excel_path, log_callback):
     """
@@ -142,9 +136,12 @@ def extraer_brubank(pdf_path, excel_path, log_callback):
                             valor_debito_bco = 0.0 if str_debe.strip() == '-' else abs(limpiar_numero(str_debe.replace('$', '')))
                             valor_credito_bco = 0.0 if str_haber.strip() == '-' else abs(limpiar_numero(str_haber.replace('$', '')))
                             
-                            # --- INVERSIÓN CONTABLE ---
-                            debe = valor_credito_bco
-                            haber = valor_debito_bco
+                            # El DEBE del banco es plata que SALE de la cuenta
+                            # (pago, debito, comision) y el CREDITO es plata que
+                            # ENTRA. Asi los guarda el resto del proyecto: DEBE
+                            # resta saldo y HABER suma.
+                            debe = valor_debito_bco
+                            haber = valor_credito_bco
                             
                             fila = {
                                 "CUENTA": cuenta_actual_str,
@@ -186,9 +183,9 @@ def generar_excel_brubank(filas, excel_path, log_callback):
             continue 
         else:
             fila_excel_anterior = fila_excel_actual - 1
-            # FÓRMULA GANADORA: G=SALDO, E=DEBE (Entradas), F=HABER (Salidas)
-            # Saldo = Saldo Anterior + Debe - Haber
-            formula = f"=G{fila_excel_anterior}+E{fila_excel_actual}-F{fila_excel_actual}"
+            # G=SALDO, E=DEBE (plata que sale), F=HABER (plata que entra)
+            # Saldo = Saldo Anterior - Debe + Haber
+            formula = f"=G{fila_excel_anterior}-E{fila_excel_actual}+F{fila_excel_actual}"
             df.at[i, "SALDO"] = formula
 
     return guardar_excel(df, excel_path)

@@ -80,6 +80,26 @@
     </button>
   </div>
 
+  <!-- Aviso: la importación vía Excel todavía no está soportada por el backend -->
+  <div
+    *ngIf="avisoExcel() as archivoExcel"
+    class="animate-aparecer-sube mb-4 flex items-center justify-between gap-4 rounded border border-amber-200 bg-[#fdf6e3] px-4 py-2.5 text-sm text-[#8a6d1f]"
+  >
+    <span class="flex items-center gap-2">
+      <i class="pi pi-exclamation-triangle text-xs"></i>
+      La importación vía Excel todavía no está disponible. Para este extracto usá
+      <span class="font-medium">Importar vía PDF</span>.
+    </span>
+    <button
+      type="button"
+      (click)="avisoExcel.set(null)"
+      class="flex h-6 w-6 shrink-0 items-center justify-center rounded text-[#8a6d1f] transition-colors duration-200 hover:bg-amber-100"
+      aria-label="Cerrar aviso"
+    >
+      <i class="pi pi-times text-xs"></i>
+    </button>
+  </div>
+
   <!-- 3. Botonera de Acciones -->
   <div class="flex gap-2 mb-6">
     <button class="bg-[#e2e6e9] text-[#4a5568] px-4 py-1.5 rounded text-sm border border-transparent hover:border-gray-400 hover:bg-[#d1d5db] transition-all duration-200">
@@ -91,13 +111,8 @@
       Autoconciliar 🪄
     </button>
     
-    <!-- Botón Importar PDF -->
-    <div class="relative">
-      <input type="file" id="subirPdf" (change)="capturarArchivo($event)" accept=".pdf" class="hidden">
-      <label for="subirPdf" class="bg-[#e2e6e9] text-[#4a5568] px-4 py-1.5 rounded text-sm flex items-center gap-1 cursor-pointer border border-transparent hover:border-gray-400 hover:bg-[#d1d5db] transition-all duration-200">
-        Importar <i class="pi pi-chevron-down text-[10px] ml-1"></i>
-      </label>
-    </div>
+    <!-- Botón Importar con desplegable (Excel / PDF) -->
+    <app-importar-menu (excelSeleccionado)="avisoExcel.set($event)"></app-importar-menu>
     
     <button class="bg-[#e2e6e9] text-[#4a5568] px-4 py-1.5 rounded text-sm border border-transparent hover:border-gray-400 hover:bg-[#d1d5db] transition-all duration-200">
       Exportar

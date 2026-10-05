@@ -1,3 +1,122 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ---------------------------------------------------------------------------
+   Base: mismo fondo y tipografía que ya usa la pantalla de conciliación
+--------------------------------------------------------------------------- */
+@layer base {
+  body {
+    @apply bg-[#f4f6f8] text-gray-700 antialiased;
+  }
+
+  /* Foco visible para navegación por teclado (no pisa los :focus existentes) */
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    outline: 2px solid rgba(0, 78, 130, 0.45);
+    outline-offset: 2px;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Animaciones compartidas por el flujo de importación
+--------------------------------------------------------------------------- */
+@keyframes aparecer-sube {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes aparecer-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes barrido {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(320%);
+  }
+}
+
+@keyframes pulso-suave {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* Micro-interacción de los totales: el número "rueda" y se recompone. */
+@keyframes total-rodante {
+  0% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  32% {
+    transform: translateY(-5px);
+    opacity: 0.25;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Y la tarjeta que cambió se insinúa con un halo muy tenue. */
+@keyframes tarjeta-cambio {
+  0%,
+  100% {
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  }
+  35% {
+    box-shadow:
+      0 1px 2px 0 rgb(0 0 0 / 0.05),
+      0 0 0 4px rgba(0, 78, 130, 0.07);
+  }
+}
+
+@layer utilities {
+  .animate-aparecer-sube {
+    animation: aparecer-sube 0.35s ease-out both;
+  }
+  .animate-aparecer-pop {
+    animation: aparecer-pop 0.18s ease-out both;
+  }
+  .animate-barrido {
+    animation: barrido 1.6s ease-in-out infinite;
+  }
+  .animate-pulso-suave {
+    animation: pulso-suave 2s ease-in-out infinite;
+  }
+  .animate-total-rodante {
+    animation: total-rodante 0.45s cubic-bezier(0.33, 1, 0.68, 1);
+  }
+  .tarjeta-cambio {
+    animation: tarjeta-cambio 0.5s ease-out;
+  }
+}
+
+/* Respetamos a quien pidió menos movimiento en el sistema. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-aparecer-sube,
+  .animate-aparecer-pop,
+  .animate-total-rodante,
+  .tarjeta-cambio {
+    animation: none;
+  }
+}

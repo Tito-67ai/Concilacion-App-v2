@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
 // 1. Importamos AppComponent con su nombre real
 import { AppComponent } from './app'; 
 
@@ -6,6 +7,7 @@ describe('AppComponent', () => {
   beforeEach(async () => {
     await TestBed.configureTestingModule({
       imports: [AppComponent],
+      providers: [provideRouter([])],
     })
       .compileComponents();
   });

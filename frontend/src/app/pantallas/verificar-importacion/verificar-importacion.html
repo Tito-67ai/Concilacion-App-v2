@@ -1,0 +1,628 @@
+<!--
+  Layout de altura completa: el scroll ocurre dentro de la tabla, así el
+  balance (arriba) y el pie (abajo) quedan siempre visibles.
+-->
+<div class="flex h-[100dvh] flex-col overflow-hidden bg-[#f4f6f8]">
+  <div
+    class="mx-auto flex w-full max-w-7xl flex-1 flex-col overflow-hidden p-6 animate-aparecer-sube"
+  >
+    <!-- 1. Encabezado -->
+    <div class="mb-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+      <div class="min-w-0">
+        <div class="flex flex-wrap items-center gap-3">
+          <h1 class="text-xl font-normal text-gray-700">
+            Verificá la información extraída del PDF
+          </h1>
+
+          <span
+            class="inline-flex max-w-full items-center gap-1.5 rounded-full border border-gray-200 bg-gray-100 px-3 py-1 text-xs text-gray-500"
+          >
+            <i class="pi pi-info-circle shrink-0 text-[11px]"></i>
+            <span class="truncate">Se va a importar en {{ cuentaNombre() }}</span>
+          </span>
+        </div>
+
+        <p class="mt-2 text-sm text-gray-500">
+          Podés editar la información de los movimientos si algo no se importó como esperabas.
+        </p>
+      </div>
+
+      <a
+        href="mailto:soporte@conciliacion.app?subject=Problema%20con%20la%20importaci%C3%B3n%20de%20PDF"
+        class="inline-flex shrink-0 items-center gap-2 rounded px-2 py-1 text-sm text-[#004e82] transition-colors duration-200 hover:bg-white"
+      >
+        <i class="pi pi-flag text-xs"></i>
+        ¿Algo no se leyó bien? Contanos
+      </a>
+    </div>
+
+    <!-- 2. Tarjetas de resumen (siempre visibles: no scrollean con la tabla) -->
+    <div class="mb-4 shrink-0">
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <!-- Total créditos -->
+        <div
+          class="rounded border border-gray-200 bg-white p-4 shadow-sm transition-shadow duration-200 hover:shadow"
+          [class.tarjeta-cambio]="destacados()"
+        >
+          <div class="flex items-start justify-between">
+            <p class="text-xs uppercase tracking-wide text-gray-400">Total créditos</p>
+            <span
+              class="flex h-8 w-8 items-center justify-center rounded-full bg-[#eaf4ec] text-[#4f9d5a]"
+            >
+              <i class="pi pi-arrow-up text-xs"></i>
+            </span>
+          </div>
+          <p
+            class="mt-3 text-2xl font-semibold tabular-nums text-[#4f9d5a]"
+            [class.animate-total-rodante]="destacados()"
+          >
+            {{ creditosFormateados() }}
+          </p>
+          <p class="mt-1 text-[11px] text-gray-400">Ingresos detectados en el extracto</p>
+        </div>
+
+        <!-- Total débitos -->
+        <div
+          class="rounded border border-gray-200 bg-white p-4 shadow-sm transition-shadow duration-200 hover:shadow"
+          [class.tarjeta-cambio]="destacados()"
+        >
+          <div class="flex items-start justify-between">
+            <p class="text-xs uppercase tracking-wide text-gray-400">Total débitos</p>
+            <span
+              class="flex h-8 w-8 items-center justify-center rounded-full bg-[#fdecec] text-[#c0392b]"
+            >
+              <i class="pi pi-arrow-down text-xs"></i>
+            </span>
+          </div>
+          <p
+            class="mt-3 text-2xl font-semibold tabular-nums text-[#c0392b]"
+            [class.animate-total-rodante]="destacados()"
+          >
+            {{ debitosFormateados() }}
+          </p>
+          <p class="mt-1 text-[11px] text-gray-400">Egresos detectados en el extracto</p>
+        </div>
+
+        <!-- Diferencias -->
+        <div
+          class="rounded border border-gray-200 bg-white p-4 shadow-sm transition-shadow duration-200 hover:shadow"
+          [class.tarjeta-cambio]="destacados()"
+        >
+          <div class="flex items-start justify-between">
+            <p class="text-xs uppercase tracking-wide text-gray-400">
+              Diferencias entre créditos y débitos
+            </p>
+            <span
+              class="flex h-8 w-8 items-center justify-center rounded-full bg-[#f0f2f5] text-[#4a5568]"
+            >
+              <i class="pi pi-arrows-h text-xs"></i>
+            </span>
+          </div>
+          <p
+            class="mt-3 text-2xl font-semibold tabular-nums text-gray-800"
+            [ngClass]="diferencia() !== 0 ? 'text-[#8a6d1f]' : ''"
+            [class.animate-total-rodante]="destacados()"
+          >
+            {{ diferenciaFormateada() }}
+          </p>
+          <p class="mt-1 text-[11px] text-gray-400">
+            {{
+              diferencia() === 0 ? 'El extracto está balanceado' : 'Revisá el extracto del banco'
+            }}
+          </p>
+        </div>
+      </div>
+
+      <!-- Aviso de errores (bloquean la importación) -->
+      <div
+        *ngIf="hayErrores()"
+        class="animate-aparecer-sube mt-4 flex items-center gap-2 rounded border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700"
+      >
+        <i class="pi pi-exclamation-triangle text-xs"></i>
+        Hay {{ importacion.erroresPorMovimiento().size }} movimiento(s) marcados en rojo. Corregilos
+        para poder confirmar la importación.
+      </div>
+
+      <!-- Aviso de formato dudoso (no bloquean) -->
+      <div
+        *ngIf="hayAvisos()"
+        class="animate-aparecer-sube mt-4 flex items-center gap-2 rounded border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800"
+      >
+        <i class="pi pi-info-circle text-xs"></i>
+        {{ importacion.avisosPorMovimiento().size }} movimiento(s) tienen un formato dudoso
+        (marcados en amarillo). Podés confirmarlos igual o corregirlos primero.
+      </div>
+    </div>
+
+    <!-- 3. Tabla de movimientos (ocupa el espacio libre y scrollea ella sola) -->
+    <div class="flex min-h-0 flex-1 flex-col rounded border border-gray-200 bg-white shadow-sm">
+      <!-- El <thead> pegajoso se ancla a este scroller con un simple top-0 -->
+      <div class="min-h-0 flex-1 overflow-auto">
+        <table class="w-full table-fixed text-left text-sm">
+          <thead>
+            <!-- top dinámico: el alto real de las tarjetas, que también son sticky -->
+            <tr class="border-b border-gray-200">
+              <!-- Fecha -->
+              <th
+                class="sticky top-0 z-10 w-[120px] bg-gray-50 px-3 py-2 text-left shadow-[0_1px_0_0_rgba(229,231,235,1)]"
+              >
+                <div class="flex items-center gap-1">
+                  <span class="text-xs font-medium uppercase tracking-wide text-gray-500"
+                    >Fecha</span
+                  >
+                  <button
+                    type="button"
+                    (click)="alternarMenuColumna('fecha', $event)"
+                    aria-label="Opciones de la columna Fecha"
+                    class="flex h-5 w-5 items-center justify-center rounded text-gray-400 transition-colors duration-200 hover:bg-gray-200 hover:text-gray-700"
+                  >
+                    <i class="pi pi-ellipsis-v text-[10px]"></i>
+                  </button>
+                  <i
+                    *ngIf="iconoOrden('fecha')"
+                    class="pi text-[9px] text-gray-400"
+                    [ngClass]="iconoOrden('fecha')"
+                  ></i>
+                </div>
+              </th>
+
+              <!-- Concepto -->
+              <th
+                class="sticky top-0 z-10 bg-gray-50 px-3 py-2 text-left shadow-[0_1px_0_0_rgba(229,231,235,1)]"
+              >
+                <div class="flex items-center gap-1">
+                  <span class="text-xs font-medium uppercase tracking-wide text-gray-500"
+                    >Concepto</span
+                  >
+                  <button
+                    type="button"
+                    (click)="alternarMenuColumna('concepto', $event)"
+                    aria-label="Opciones de la columna Concepto"
+                    class="flex h-5 w-5 items-center justify-center rounded text-gray-400 transition-colors duration-200 hover:bg-gray-200 hover:text-gray-700"
+                  >
+                    <i class="pi pi-ellipsis-v text-[10px]"></i>
+                  </button>
+                  <i
+                    *ngIf="iconoOrden('concepto')"
+                    class="pi text-[9px] text-gray-400"
+                    [ngClass]="iconoOrden('concepto')"
+                  ></i>
+                </div>
+              </th>
+
+              <!-- Crédito -->
+              <th
+                class="sticky top-0 z-10 w-[140px] bg-gray-50 px-3 py-2 text-right shadow-[0_1px_0_0_rgba(229,231,235,1)]"
+              >
+                <div class="flex items-center justify-end gap-1">
+                  <i
+                    *ngIf="iconoOrden('credito')"
+                    class="pi text-[9px] text-gray-400"
+                    [ngClass]="iconoOrden('credito')"
+                  ></i>
+                  <button
+                    type="button"
+                    (click)="alternarMenuColumna('credito', $event)"
+                    aria-label="Opciones de la columna Crédito"
+                    class="flex h-5 w-5 items-center justify-center rounded text-gray-400 transition-colors duration-200 hover:bg-gray-200 hover:text-gray-700"
+                  >
+                    <i class="pi pi-ellipsis-v text-[10px]"></i>
+                  </button>
+                  <span class="text-xs font-medium uppercase tracking-wide text-gray-500"
+                    >Crédito</span
+                  >
+                </div>
+              </th>
+
+              <!-- Débito -->
+              <th
+                class="sticky top-0 z-10 w-[140px] bg-gray-50 px-3 py-2 text-right shadow-[0_1px_0_0_rgba(229,231,235,1)]"
+              >
+                <div class="flex items-center justify-end gap-1">
+                  <i
+                    *ngIf="iconoOrden('debito')"
+                    class="pi text-[9px] text-gray-400"
+                    [ngClass]="iconoOrden('debito')"
+                  ></i>
+                  <button
+                    type="button"
+                    (click)="alternarMenuColumna('debito', $event)"
+                    aria-label="Opciones de la columna Débito"
+                    class="flex h-5 w-5 items-center justify-center rounded text-gray-400 transition-colors duration-200 hover:bg-gray-200 hover:text-gray-700"
+                  >
+                    <i class="pi pi-ellipsis-v text-[10px]"></i>
+                  </button>
+                  <span class="text-xs font-medium uppercase tracking-wide text-gray-500"
+                    >Débito</span
+                  >
+                </div>
+              </th>
+
+              <!-- Acciones -->
+              <th
+                class="sticky top-0 z-10 w-[76px] bg-gray-50 px-3 py-2 shadow-[0_1px_0_0_rgba(229,231,235,1)]"
+              >
+                <span class="sr-only">Acciones</span>
+              </th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <!-- group/fila: el lápiz de cada celda editable aparece al pasar el mouse -->
+            <tr
+              *ngFor="let mov of movimientosOrdenados()"
+              class="group/fila border-l-2 transition-colors duration-150 hover:bg-slate-50"
+              [ngClass]="
+                estadoFila(mov) === 'error'
+                  ? 'border-l-[#e07a7a] bg-red-50'
+                  : estadoFila(mov) === 'aviso'
+                    ? 'border-l-[#e3c777] bg-amber-50/70'
+                    : 'border-l-transparent'
+              "
+            >
+              <ng-container *ngIf="editandoId() === mov.id; else filaLectura">
+                <!-- ====== FILA EN EDICIÓN ====== -->
+
+                <!-- Fecha -->
+                <td class="px-3 py-2 align-top">
+                  <input
+                    type="date"
+                    [attr.value]="mov.fecha"
+                    (input)="cambiarFecha(mov, $any($event.target).value)"
+                    (keydown.enter)="guardar(mov)"
+                    (keydown.escape)="cancelarEdicion()"
+                    class="h-8 w-full rounded border bg-white px-2 text-sm text-gray-700 focus:outline-none focus:border-blue-400"
+                    [ngClass]="error(mov, 'fecha') ? 'border-red-400' : 'border-gray-300'"
+                  />
+                  <p *ngIf="error(mov, 'fecha') as err" class="mt-1 text-[11px] text-red-500">
+                    {{ err }}
+                  </p>
+                </td>
+
+                <!-- Concepto -->
+                <td class="px-3 py-2 align-top">
+                  <input
+                    type="text"
+                    placeholder="Ej: Transferencia de Sergio"
+                    [attr.value]="mov.concepto"
+                    (input)="cambiarConcepto(mov, $any($event.target).value)"
+                    (keydown.enter)="guardar(mov)"
+                    (keydown.escape)="cancelarEdicion()"
+                    class="h-8 w-full rounded border bg-white px-2 text-sm text-gray-700 focus:outline-none focus:border-blue-400"
+                    [ngClass]="error(mov, 'concepto') ? 'border-red-400' : 'border-gray-300'"
+                  />
+                  <p *ngIf="error(mov, 'concepto') as err" class="mt-1 text-[11px] text-red-500">
+                    {{ err }}
+                  </p>
+                </td>
+
+                <!-- Crédito -->
+                <td class="px-3 py-2 text-right align-top">
+                  <input
+                    type="text"
+                    inputmode="decimal"
+                    placeholder="0,00"
+                    [attr.value]="mov.credito === null ? '' : mov.credito"
+                    (input)="cambiarImporte(mov, 'credito', $any($event.target).value)"
+                    (keydown.enter)="guardar(mov)"
+                    (keydown.escape)="cancelarEdicion()"
+                    class="h-8 w-full rounded border bg-white px-2 text-right text-sm tabular-nums text-gray-700 focus:outline-none focus:border-blue-400"
+                    [ngClass]="error(mov, 'credito') ? 'border-red-400' : 'border-gray-300'"
+                  />
+                  <p *ngIf="error(mov, 'credito') as err" class="mt-1 text-[11px] text-red-500">
+                    {{ err }}
+                  </p>
+                  <p *ngIf="aviso(mov, 'credito') as av" class="mt-1 text-[11px] text-amber-700">
+                    {{ av }}
+                  </p>
+                </td>
+
+                <!-- Débito -->
+                <td class="px-3 py-2 text-right align-top">
+                  <input
+                    type="text"
+                    inputmode="decimal"
+                    placeholder="0,00"
+                    [attr.value]="mov.debito === null ? '' : mov.debito"
+                    (input)="cambiarImporte(mov, 'debito', $any($event.target).value)"
+                    (keydown.enter)="guardar(mov)"
+                    (keydown.escape)="cancelarEdicion()"
+                    class="h-8 w-full rounded border bg-white px-2 text-right text-sm tabular-nums text-gray-700 focus:outline-none focus:border-blue-400"
+                    [ngClass]="error(mov, 'debito') ? 'border-red-400' : 'border-gray-300'"
+                  />
+                  <p *ngIf="error(mov, 'debito') as err" class="mt-1 text-[11px] text-red-500">
+                    {{ err }}
+                  </p>
+                  <!-- El error de importes va junto a la celda de débito para que
+                       se vea sin tener que salir del modo edición -->
+                  <p *ngIf="error(mov, 'importe') as err" class="mt-1 text-[11px] text-red-500">
+                    {{ err }}
+                  </p>
+                  <p *ngIf="aviso(mov, 'debito') as av" class="mt-1 text-[11px] text-amber-700">
+                    {{ av }}
+                  </p>
+                </td>
+
+                <!-- Acciones -->
+                <td class="px-3 py-2 align-top">
+                  <div class="flex items-center gap-1">
+                    <button
+                      type="button"
+                      (click)="guardar(mov)"
+                      aria-label="Guardar movimiento"
+                      class="flex h-7 w-7 items-center justify-center rounded bg-[#eaf4ec] text-[#4f9d5a] transition-colors duration-200 hover:bg-[#9ecb9b]"
+                    >
+                      <i class="pi pi-check text-xs"></i>
+                    </button>
+                    <button
+                      type="button"
+                      (click)="cancelarEdicion()"
+                      aria-label="Cancelar edición"
+                      class="flex h-7 w-7 items-center justify-center rounded text-gray-400 transition-colors duration-200 hover:bg-gray-100 hover:text-gray-700"
+                    >
+                      <i class="pi pi-times text-xs"></i>
+                    </button>
+                  </div>
+                </td>
+              </ng-container>
+
+              <!-- ====== FILA EN LECTURA ====== -->
+              <ng-template #filaLectura>
+                <!--
+                  El tinte de la fila vive en el <tr>, así que las celdas quedan
+                  transparentes: así se ve el hover y el color de estado.
+                -->
+                <td class="px-3 py-2 text-left text-gray-700">
+                  <span class="inline-flex items-center gap-1.5">
+                    <i
+                      class="pi pi-pencil shrink-0 text-[9px] text-gray-300 opacity-0 transition-opacity duration-200 group-hover/fila:opacity-100"
+                      aria-hidden="true"
+                    ></i>
+                    {{ formatearFecha(mov.fecha) || '—' }}
+                  </span>
+                  <p *ngIf="error(mov, 'fecha') as err" class="mt-0.5 text-[11px] text-red-600">
+                    {{ err }}
+                  </p>
+                </td>
+
+                <td class="px-3 py-2 text-left text-gray-700">
+                  <span class="flex max-w-full items-center gap-1.5">
+                    <i
+                      class="pi pi-pencil shrink-0 text-[9px] text-gray-300 opacity-0 transition-opacity duration-200 group-hover/fila:opacity-100"
+                      aria-hidden="true"
+                    ></i>
+                    <span class="min-w-0 truncate">{{ mov.concepto || '—' }}</span>
+                  </span>
+                  <p *ngIf="error(mov, 'concepto') as err" class="mt-0.5 text-[11px] text-red-600">
+                    {{ err }}
+                  </p>
+                </td>
+
+                <td class="whitespace-nowrap px-3 py-2 text-right tabular-nums text-[#4f9d5a]">
+                  <span class="inline-flex items-center gap-1.5">
+                    {{ mov.credito === null ? '' : formatearImporte(mov.credito) }}
+                    <i
+                      class="pi pi-pencil shrink-0 text-[9px] text-gray-300 opacity-0 transition-opacity duration-200 group-hover/fila:opacity-100"
+                      aria-hidden="true"
+                    ></i>
+                  </span>
+                  <p *ngIf="error(mov, 'credito') as err" class="mt-0.5 text-[11px] text-red-600">
+                    {{ err }}
+                  </p>
+                  <p *ngIf="aviso(mov, 'credito') as av" class="mt-0.5 text-[11px] text-amber-700">
+                    {{ av }}
+                  </p>
+                </td>
+
+                <td class="whitespace-nowrap px-3 py-2 text-right tabular-nums text-[#c0392b]">
+                  <span class="inline-flex items-center gap-1.5">
+                    {{ mov.debito === null ? '' : formatearImporte(mov.debito) }}
+                    <i
+                      class="pi pi-pencil shrink-0 text-[9px] text-gray-300 opacity-0 transition-opacity duration-200 group-hover/fila:opacity-100"
+                      aria-hidden="true"
+                    ></i>
+                  </span>
+                  <p *ngIf="error(mov, 'debito') as err" class="mt-0.5 text-[11px] text-red-600">
+                    {{ err }}
+                  </p>
+                  <p *ngIf="aviso(mov, 'debito') as av" class="mt-0.5 text-[11px] text-amber-700">
+                    {{ av }}
+                  </p>
+                  <p *ngIf="error(mov, 'importe') as err" class="mt-0.5 text-[11px] text-red-600">
+                    {{ err }}
+                  </p>
+                </td>
+
+                <!-- Acciones -->
+                <td class="px-3 py-2">
+                  <div class="flex items-center gap-1">
+                    <button
+                      type="button"
+                      (click)="editar(mov)"
+                      aria-label="Editar movimiento"
+                      class="flex h-7 w-7 items-center justify-center rounded text-gray-400 transition-colors duration-200 hover:bg-gray-100 hover:text-[#004e82]"
+                    >
+                      <i class="pi pi-pencil text-xs"></i>
+                    </button>
+                    <button
+                      type="button"
+                      (click)="eliminar(mov)"
+                      aria-label="Eliminar movimiento"
+                      class="flex h-7 w-7 items-center justify-center rounded text-gray-400 transition-colors duration-200 hover:bg-[#fdecec] hover:text-[#c0392b]"
+                    >
+                      <i class="pi pi-trash text-xs"></i>
+                    </button>
+                  </div>
+                </td>
+              </ng-template>
+            </tr>
+
+            <!-- Estado vacío -->
+            <tr *ngIf="cantidadMovimientos() === 0">
+              <td colspan="5" class="px-3 py-16 text-center">
+                <!-- Documento con lupa, en grises muy suaves -->
+                <svg
+                  class="mx-auto h-24 w-24"
+                  viewBox="0 0 64 64"
+                  fill="none"
+                  role="img"
+                  aria-label="Ningún movimiento para mostrar"
+                >
+                  <path
+                    d="M15 5h21l13 13v41a4 4 0 0 1-4 4H15a4 4 0 0 1-4-4V9a4 4 0 0 1 4-4Z"
+                    fill="#f8fafc"
+                    stroke="#e0e6ec"
+                    stroke-width="2"
+                  />
+                  <path
+                    d="M36 5v13h13"
+                    fill="none"
+                    stroke="#e0e6ec"
+                    stroke-width="2"
+                    stroke-linejoin="round"
+                  />
+                  <path
+                    d="M19 27h13M19 33h9"
+                    stroke="#edf1f5"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                  />
+                  <circle
+                    cx="39"
+                    cy="43"
+                    r="9.5"
+                    fill="#ffffff"
+                    stroke="#d3dbe3"
+                    stroke-width="2.5"
+                  />
+                  <path
+                    d="m46.5 50.5 5 5"
+                    stroke="#d3dbe3"
+                    stroke-width="3"
+                    stroke-linecap="round"
+                  />
+                </svg>
+
+                <p class="mt-5 text-sm text-gray-400">No hay registros para mostrar.</p>
+                <p class="mt-1 text-xs text-gray-300">
+                  Cuando el backend devuelva los movimientos del PDF van a aparecer acá.
+                </p>
+              </td>
+            </tr>
+          </tbody>
+
+          <tfoot *ngIf="cantidadMovimientos() > 0">
+            <tr class="border-t border-gray-200 bg-gray-50">
+              <td colspan="4" class="px-3 py-2 text-xs text-gray-500">
+                Movimientos a importar: {{ cantidadMovimientos() }}
+              </td>
+              <td class="px-3 py-2"></td>
+            </tr>
+            <tr class="border-t border-gray-200 bg-gray-50">
+              <td colspan="2" class="px-3 py-2 text-right text-xs font-medium text-gray-600">
+                Totales
+              </td>
+              <td class="px-3 py-2 text-right text-xs font-medium tabular-nums text-[#4f9d5a]">
+                {{ creditosFormateados() }}
+              </td>
+              <td class="px-3 py-2 text-right text-xs font-medium tabular-nums text-[#c0392b]">
+                {{ debitosFormateados() }}
+              </td>
+              <td class="px-3 py-2"></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <!-- Agregar movimiento -->
+      <div class="shrink-0 border-t border-gray-100 p-4">
+        <button
+          type="button"
+          (click)="agregarMovimiento()"
+          class="inline-flex items-center gap-2 rounded border border-[#004e82] px-4 py-1.5 text-sm text-[#004e82] transition-all duration-200 hover:bg-[#f2f7fb]"
+        >
+          <i class="pi pi-plus text-xs"></i>
+          Agregar movimiento
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. Menú de opciones de la columna (uno solo, anclado al botón que se clicó) -->
+  <div
+    *ngIf="menuColumna() as columna"
+    role="menu"
+    [style.left.px]="menuPos()?.left"
+    [style.top.px]="menuPos()?.top"
+    class="animate-aparecer-pop fixed z-50 w-56 rounded-lg border border-gray-200 bg-white p-1.5 shadow-lg shadow-black/5"
+  >
+    <p class="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+      Columna {{ columna }}
+    </p>
+    <button
+      type="button"
+      role="menuitem"
+      (click)="ordenarPorMenu('asc')"
+      class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-700 transition-colors duration-150 hover:bg-[#f4f6f8]"
+    >
+      <i class="pi pi-arrow-up text-[10px] text-gray-400"></i>
+      Ordenar de menor a mayor
+    </button>
+    <button
+      type="button"
+      role="menuitem"
+      (click)="ordenarPorMenu('desc')"
+      class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-700 transition-colors duration-150 hover:bg-[#f4f6f8]"
+    >
+      <i class="pi pi-arrow-down text-[10px] text-gray-400"></i>
+      Ordenar de mayor a menor
+    </button>
+    <div class="my-1.5 h-px bg-gray-100"></div>
+    <button
+      type="button"
+      role="menuitem"
+      (click)="quitarOrdenDesdeMenu()"
+      [disabled]="!hayOrdenActiva()"
+      class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-500 transition-colors duration-150 hover:bg-[#f4f6f8] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+    >
+      <i class="pi pi-times text-[10px]"></i>
+      Quitar orden
+    </button>
+  </div>
+
+  <!-- 5. Botones de acción -->
+  <div class="shrink-0 border-t border-gray-200 bg-white px-6 py-4">
+    <div
+      class="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+    >
+      <p class="text-xs text-gray-400">
+        <i class="pi pi-info-circle mr-1 text-[11px]"></i>
+        Al confirmar, los movimientos quedan listos para imputarse en {{ cuentaNombre() }}.
+      </p>
+
+      <div class="flex justify-end gap-2">
+        <button
+          type="button"
+          (click)="cancelar()"
+          class="rounded border border-gray-400 bg-transparent px-4 py-1.5 text-sm text-gray-700 transition-all duration-200 hover:bg-white hover:border-gray-600"
+        >
+          Cancelar
+        </button>
+
+        <button
+          type="button"
+          (click)="confirmar()"
+          [disabled]="!puedeConfirmar()"
+          [ngClass]="
+            puedeConfirmar()
+              ? 'bg-[#004e82] text-white hover:bg-[#00395e]'
+              : 'cursor-not-allowed bg-[#d5dbe0] text-[#8b95a1]'
+          "
+          class="rounded px-6 py-1.5 text-sm transition-all duration-200"
+        >
+          Confirmar importación
+        </button>
+      </div>
+    </div>
+  </div>
+</div>

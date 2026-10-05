@@ -1,11 +1,12 @@
-import { Component } from '@angular/core';
+import { Component, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { CommonModule } from '@angular/common';
+import { ImportarMenuComponent } from '../../componentes/importar-menu/importar-menu';
 
 @Component({
   selector: 'app-conciliacion',
   standalone: true,
-  imports: [CommonModule], 
+  imports: [CommonModule, ImportarMenuComponent],
   templateUrl: './conciliacion.html'
 })
 export class ConciliacionComponent {
@@ -16,6 +17,10 @@ export class ConciliacionComponent {
 
   // Estado para controlar qué pestaña está seleccionada (Sin usar la ñ)
   tabActiva: string = 'a_conciliar';
+
+  // Archivo Excel elegido desde el desplegable "Importar". El backend todavía
+  // no expone un endpoint de Excel, así que solo mostramos el aviso.
+  readonly avisoExcel = signal<File | null>(null);
 
   constructor(private http: HttpClient) {}
 

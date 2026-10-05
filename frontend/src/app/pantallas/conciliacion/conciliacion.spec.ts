@@ -1,6 +1,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
+import { provideRouter } from '@angular/router';
 
 // Aquí está la corrección: importamos ConciliacionComponent
 import { ConciliacionComponent } from './conciliacion'; 
@@ -14,7 +15,8 @@ describe('ConciliacionComponent', () => {
       imports: [ConciliacionComponent],
       providers: [
         provideHttpClient(),
-        provideHttpClientTesting()
+        provideHttpClientTesting(),
+        provideRouter([]) // <-- El desplegable "Importar" usa el Router
       ]
     }).compileComponents();
 

@@ -1,0 +1,176 @@
+<div class="flex min-h-screen items-center justify-center bg-[#f4f6f8] p-6">
+  <div class="w-full max-w-2xl animate-aparecer-sube">
+
+    <!-- Tarjeta de estado -->
+    <div class="overflow-hidden rounded border border-gray-200 bg-white shadow-sm">
+
+      <!-- Barra de progreso -->
+      <div class="relative h-1 w-full bg-gray-100">
+        <div
+          class="h-full bg-[#004e82] transition-all duration-700 ease-out"
+          [style.width.%]="progreso()"
+        ></div>
+        <!-- Barrido de luz mientras sigue trabajando -->
+        <div *ngIf="!finalizado()" class="pointer-events-none absolute inset-0 overflow-hidden">
+          <div class="animate-barrido h-full w-1/3 bg-gradient-to-r from-transparent via-white/70 to-transparent"></div>
+        </div>
+      </div>
+
+      <!-- Encabezado -->
+      <div class="flex items-start gap-4 border-b border-gray-100 p-6">
+        <span
+          class="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg transition-colors duration-500"
+          [ngClass]="finalizado() ? 'bg-[#eaf4ec] text-[#4f9d5a]' : 'bg-[#fdecec] text-[#c0392b]'"
+        >
+          <i class="pi pi-file-pdf text-xl" [ngClass]="!finalizado() ? 'animate-pulso-suave' : ''"></i>
+        </span>
+
+        <div class="min-w-0 flex-1">
+          <h1 class="text-lg font-semibold text-gray-800">
+            {{ finalizado() ? 'Listo, ya analizamos tu PDF' : 'Estamos analizando tu PDF' }}
+          </h1>
+          <p class="mt-0.5 truncate text-sm text-gray-500">{{ archivoNombre() }}</p>
+          <p *ngIf="!finalizado()" class="mt-1 text-xs text-gray-400">
+            Puede demorar unos minutos. No cierres esta pantalla.
+          </p>
+        </div>
+
+        <span
+          class="shrink-0 rounded-full bg-[#f0f2f5] px-3 py-1 text-[11px] tabular-nums text-gray-500"
+          title="Tiempo transcurrido"
+        >
+          <i class="pi pi-clock mr-1 text-[10px]"></i>{{ tiempoTranscurrido() }}
+        </span>
+      </div>
+
+      <!-- Stepper -->
+      <ol class="p-6">
+        <li
+          *ngFor="let paso of pasos; let i = index; let ultimo = last"
+          class="relative flex gap-4"
+          [class.pb-7]="!ultimo"
+        >
+          <!-- Línea que conecta los pasos -->
+          <span
+            *ngIf="!ultimo"
+            class="absolute left-[15px] top-9 h-[calc(100%-2.25rem)] w-px transition-colors duration-500"
+            [ngClass]="estados()[i] === 'completado' ? 'bg-[#004e82]' : 'bg-gray-200'"
+          ></span>
+
+          <!-- Círculo de estado -->
+          <span class="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full">
+            <!-- Completado -->
+            <ng-container *ngIf="estados()[i] === 'completado'">
+              <span class="flex h-8 w-8 items-center justify-center rounded-full bg-[#9ecb9b] shadow-sm">
+                <i class="pi pi-check text-xs text-white"></i>
+              </span>
+            </ng-container>
+
+            <!-- Cargando -->
+            <ng-container *ngIf="estados()[i] === 'cargando'">
+              <span class="absolute inset-0 animate-pulse rounded-full bg-[#004e82]/10"></span>
+              <span
+                class="relative flex h-8 w-8 items-center justify-center rounded-full border-2 border-[#004e82]/40 bg-white"
+              >
+                <i class="pi pi-spin pi-spinner text-sm text-[#004e82]"></i>
+              </span>
+            </ng-container>
+
+            <!-- Pendiente -->
+            <ng-container *ngIf="estados()[i] === 'pendiente'">
+              <span
+                class="flex h-8 w-8 items-center justify-center rounded-full border-2 border-gray-200 bg-white"
+              >
+                <span class="h-2 w-2 rounded-full bg-gray-200"></span>
+              </span>
+            </ng-container>
+          </span>
+
+          <!-- Texto del paso -->
+          <div class="min-w-0 flex-1 pt-1">
+            <p
+              class="text-sm transition-colors duration-300"
+              [ngClass]="
+                estados()[i] === 'pendiente' ? 'text-gray-400' : 'font-medium text-gray-700'
+              "
+            >
+              {{ paso.titulo }}
+            </p>
+            <p
+              *ngIf="estados()[i] !== 'pendiente'"
+              class="animate-aparecer-sube mt-0.5 text-xs text-gray-400"
+            >
+              {{ paso.detalle }}
+            </p>
+          </div>
+
+          <!-- Etiqueta lateral -->
+          <div class="shrink-0 pt-1.5 text-right">
+            <span *ngIf="estados()[i] === 'completado'" class="text-[11px] text-[#4f9d5a]">Listo</span>
+            <span
+              *ngIf="estados()[i] === 'cargando'"
+              class="animate-pulso-suave text-[11px] text-[#004e82]"
+            >
+              Procesando…
+            </span>
+          </div>
+        </li>
+      </ol>
+
+      <!-- Pie: en proceso -->
+      <div *ngIf="!finalizado()" class="flex items-center justify-between gap-4 border-t border-gray-100 bg-[#fafbfc] px-6 py-4">
+        <p class="text-xs text-gray-400">
+          Cuenta destino: <span class="text-gray-600">{{ cuentaNombre() }}</span>
+        </p>
+        <button
+          type="button"
+          (click)="cancelar()"
+          class="shrink-0 rounded px-3 py-1.5 text-sm text-[#4a5568] transition-all duration-200 hover:bg-white hover:text-[#004e82]"
+        >
+          <i class="pi pi-times mr-1 text-[10px]"></i>
+          Cancelar
+        </button>
+      </div>
+
+      <!-- Pie: terminado -->
+      <div
+        *ngIf="finalizado()"
+        class="animate-aparecer-sube flex flex-col gap-4 border-t border-gray-100 bg-[#fafbfc] px-6 py-5 sm:flex-row sm:items-center sm:justify-between"
+      >
+        <div class="flex items-center gap-3">
+          <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#9ecb9b]">
+            <i class="pi pi-check text-sm text-white"></i>
+          </span>
+          <div>
+            <p class="text-sm font-medium text-gray-700">Procesamiento completado</p>
+            <p class="text-xs text-gray-400">
+              Los movimientos se van a imputar en {{ cuentaNombre() }}.
+            </p>
+          </div>
+        </div>
+
+        <div class="flex shrink-0 justify-end gap-2">
+          <button
+            type="button"
+            (click)="importarOtro()"
+            class="rounded border border-transparent bg-[#e2e6e9] px-4 py-1.5 text-sm text-[#4a5568] transition-all duration-200 hover:border-gray-400 hover:bg-[#d1d5db]"
+          >
+            Importar otro PDF
+          </button>
+          <button
+            type="button"
+            (click)="verMovimientos()"
+            class="rounded bg-[#004e82] px-4 py-1.5 text-sm text-white transition-all duration-200 hover:bg-[#00395e]"
+          >
+            Revisar importación
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <p class="mt-4 text-center text-xs text-gray-400">
+      <i class="pi pi-lock mr-1 text-[10px]"></i>
+      El archivo se procesa de forma segura y no se guarda en tu equipo.
+    </p>
+  </div>
+</div>

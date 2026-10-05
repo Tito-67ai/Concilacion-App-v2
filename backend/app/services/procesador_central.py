@@ -20,6 +20,7 @@ from app.services.bancos import (
     BcoRIO,
     BcoSUPV,
 )
+from app.services.bancos.BcoSANT import extraer_santander_rio
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,7 @@ BANCOS = {
     "HIPO": BcoHIPO.extraer_hipotecario,
     "BBK": BcoBBK.extraer_brubank,
     "MP": BcoMP.extraer_mp,
+    "SANT": extraer_santander_rio,
 }
 
 FORMATOS_FECHA = ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%y", "%Y/%m/%d", "%d.%m.%Y")
@@ -344,5 +346,9 @@ def procesar_archivo(banco_id: str, ruta_pdf: str) -> list[MovimientoBancario]:
         logger.exception("Fallo inesperado leyendo el PDF de %s", banco)
         raise ErrorDeExtraccion(f"{banco}: error leyendo el PDF: {e}") from e
     finally:
+        # Solo el Excel intermedio es de nuestra propiedad. El PDF es el
+        # archivo que nos paso el llamador: borrarlo aqui destruia el original
+        # cuando alguien reutilizaba la misma ruta (tests, scripts, la descarga
+        # del usuario) y hacia que el motor generico ya no tuviera con que
+        # trabajar en el fallback.
         _borrar(excel_tmp)
-        _borrar(ruta_pdf)

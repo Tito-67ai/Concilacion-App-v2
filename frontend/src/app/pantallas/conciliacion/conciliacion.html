@@ -22,11 +22,12 @@
     
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6 items-end">
       
-      <!-- Fila 1, Columna 1: Cuenta contable -->
+      <!-- Fila 1, Columna 1: Banco del extracto -->
       <div class="flex flex-col relative">
-        <label class="text-[11px] text-gray-500 absolute -top-2 left-2 bg-white px-1">Cuenta contable<span class="text-red-500">*</span></label>
-        <select class="border border-gray-300 rounded p-2 text-sm text-gray-700 h-10 appearance-none bg-transparent focus:outline-none focus:border-blue-400">
-          <option></option>
+        <label class="text-[11px] text-gray-500 absolute -top-2 left-2 bg-white px-1">Banco del extracto<span class="text-red-500">*</span></label>
+        <select [(ngModel)]="bancoSeleccionado"
+                class="border border-gray-300 rounded p-2 text-sm text-gray-700 h-10 appearance-none bg-transparent focus:outline-none focus:border-blue-400">
+          <option *ngFor="let banco of bancos" [value]="banco">{{ banco }}</option>
         </select>
         <i class="pi pi-chevron-down absolute right-3 top-3.5 text-xs text-gray-400 pointer-events-none"></i>
       </div>
@@ -111,12 +112,27 @@
       Autoconciliar 🪄
     </button>
     
+<<<<<<< HEAD
     <!-- Botón Importar con desplegable (Excel / PDF) -->
     <app-importar-menu (excelSeleccionado)="avisoExcel.set($event)"></app-importar-menu>
+=======
+    <!-- Botón Importar: PDF, Excel o CSV -->
+    <div class="relative">
+      <input type="file" id="subirExtracto" (change)="capturarArchivo($event)" accept=".pdf,.xlsx,.xls,.csv" class="hidden">
+      <label for="subirExtracto" class="bg-[#e2e6e9] text-[#4a5568] px-4 py-1.5 rounded text-sm flex items-center gap-1 cursor-pointer border border-transparent hover:border-gray-400 hover:bg-[#d1d5db] transition-all duration-200">
+        Importar <i class="pi pi-chevron-down text-[10px] ml-1"></i>
+      </label>
+    </div>
+>>>>>>> b58d3b94a0baa416951601d14742fe4893c230e8
     
     <button class="bg-[#e2e6e9] text-[#4a5568] px-4 py-1.5 rounded text-sm border border-transparent hover:border-gray-400 hover:bg-[#d1d5db] transition-all duration-200">
       Exportar
     </button>
+  </div>
+
+  <!-- Errores del backend: el motivo real, no un "ocurrió un error" -->
+  <div *ngIf="errorMensaje" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded px-4 py-3 mb-6">
+    {{ errorMensaje }}
   </div>
 
   <!-- 4. Vista Dividida (Tablas) -->
@@ -128,7 +144,7 @@
       <div class="flex justify-between items-center mb-5">
         <h3 class="text-[15px] font-semibold text-gray-800">Movimientos bancarios</h3>
         <div class="flex gap-2">
-          <span class="bg-[#f0f2f5] text-gray-500 text-[11px] px-3 py-1 rounded-full border border-gray-200">Banco</span>
+          <span class="bg-[#f0f2f5] text-gray-500 text-[11px] px-3 py-1 rounded-full border border-gray-200">{{ bancoSeleccionado || 'Banco' }}</span>
           <span class="bg-[#f0f2f5] text-gray-500 text-[11px] px-3 py-1 rounded-full border border-gray-200">Excel</span>
           <span class="bg-[#9ecb9b] text-white text-[11px] px-3 py-1 rounded-full shadow-sm">PDF</span>
         </div>
@@ -189,8 +205,29 @@
       </div>
 
       <!-- Estado Vacío -->
-      <div class="flex-1 flex items-center justify-center">
+      <div class="flex-1 flex items-center justify-center" *ngIf="movimientosXubio.length === 0">
         <p class="text-gray-500 text-sm">Elegí los filtros para visualizar la información</p>
+      </div>
+
+      <div class="overflow-x-auto" *ngIf="movimientosXubio.length > 0">
+        <table class="w-full text-xs text-left text-gray-600">
+          <thead class="bg-gray-50 border-b border-gray-200">
+            <tr>
+              <th class="px-3 py-2 font-medium">Fecha</th>
+              <th class="px-3 py-2 font-medium">Concepto</th>
+              <th class="px-3 py-2 font-medium text-right">Debe</th>
+              <th class="px-3 py-2 font-medium text-right">Haber</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let mov of movimientosXubio" class="border-b border-gray-100 hover:bg-gray-50">
+              <td class="px-3 py-2">{{ mov.fecha }}</td>
+              <td class="px-3 py-2">{{ mov.concepto }}</td>
+              <td class="px-3 py-2 text-right">{{ mov.debe > 0 ? mov.debe : '' }}</td>
+              <td class="px-3 py-2 text-right">{{ mov.haber > 0 ? mov.haber : '' }}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
 

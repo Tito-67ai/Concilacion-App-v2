@@ -61,7 +61,13 @@ export interface ParConciliado {
 export interface EncabezadoConciliacion {
   empresa: string;
   banco: string;
-  numeroCuenta: string;
+  /**
+   * Va en snake_case como el resto del payload (`concepto_banco`,
+   * `pendientes_xubio`): el schema del backend es `numero_cuenta` y Pydantic
+   * ignora las claves que no reconoce, asi que con `numeroCuenta` la cuenta se
+   * perdia en el viaje y el papel de trabajo salia sin ese campo.
+   */
+  numero_cuenta: string;
   /** `YYYY-MM`, porque la celda del periodo tiene formato `mmmm yyyy`. */
   periodo: string | null;
 }

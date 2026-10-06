@@ -379,6 +379,34 @@ describe('ConciliacionComponent', () => {
     expect(component.paresAutomaticos.length).toBe(1);
   });
 
+  it('sin extracto el boton de autoconciliar esta apagado y dice por que', () => {
+    expect(component.puedeAutoconciliar).toBe(false);
+    expect(component.motivoAutoconciliarBloqueado).toContain('importar un extracto');
+
+    component.movimientosBanco = [{ fecha: '2026-07-01', concepto: 'X', debe: 1, haber: 0, saldo: 1 }];
+    expect(component.puedeAutoconciliar).toBe(true);
+    expect(component.motivoAutoconciliarBloqueado).toBe('');
+  });
+
+  it('mientras corre el cruce no se manda otro', () => {
+    component.movimientosBanco = [{ fecha: '2026-07-01', concepto: 'X', debe: 1, haber: 0, saldo: 1 }];
+    component.ejecutarAutoconciliacion();
+
+    expect(component.cargando).toBe(true);
+    expect(component.puedeAutoconciliar).toBe(false);
+
+    // Tres clicks seguidos tienen que ser un solo cruce: cada uno contra la
+    // API de Xubio cuesta plata y tiempo.
+    component.ejecutarAutoconciliacion();
+    component.ejecutarAutoconciliacion();
+    http.expectOne(`${API}/xubio/cruzar-datos`).flush({
+      exito: true,
+      tablas: { conciliados: [], pendientes_banco: [], pendientes_xubio: [] },
+    });
+
+    expect(component.cargando).toBe(false);
+  });
+
   // ------------------------------------------------------------------
   // Que se vea de verdad
   //
@@ -503,6 +531,39 @@ describe('ConciliacionComponent', () => {
     // Poner un nombre inventado en un papel de trabajo firmado es peor que
     // dejarlo en blanco.
     expect(component.encabezadoDelPapel().empresa).toBe('');
+  });
+
+  // El membrete se arma con la seleccion del flujo de importacion, que
+  // ngOnInit vacia del servicio. Sin guardarla antes, la cuenta elegida en
+  // /importar-pdf se perdia y el papel salia sin numero de cuenta.
+  it('la cuenta y el banco elegidos en /importar-pdf llegan al membrete', () => {
+    importacion.guardar({
+      cuentaId: '1105',
+      cuentaNombre: 'Caja',
+      banco: 'SANT',
+      archivo: archivoConNombre('julio.pdf'),
+    });
+    importacion.setMovimientos([
+      { fecha: '2026-07-01', concepto: 'COBRO', debe: 0, haber: 5, saldo: 5 },
+    ] as any);
+
+    const recienCreado = TestBed.createComponent(ConciliacionComponent);
+    recienCreado.componentInstance.ngOnInit();
+    // SANT va el ultimo a proposito: si la precarga del primer banco pisara
+    // la seleccion del flujo, el membrete diria ICBC.
+    http.expectOne(`${API}/extractos/bancos`).flush({
+      bancos: ['ICBC', 'SANT'],
+      formatos: [],
+    });
+
+    const encabezado = recienCreado.componentInstance.encabezadoDelPapel();
+
+    // numero_cuenta y no numeroCuenta: Pydantic tira las claves que no
+    // reconoce, asi que con el nombre en camelCase la cuenta nunca llegaba.
+    expect(encabezado.numero_cuenta).toBe('1105');
+    expect(encabezado.banco).toBe('SANT');
+    // El servicio se vacia igual que antes: los movimientos no resucitan.
+    expect(importacion.movimientos().length).toBe(0);
   });
 
   it('exportar baja el archivo y avisa con el conteo', async () => {

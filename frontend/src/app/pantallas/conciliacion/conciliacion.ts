@@ -12,7 +12,10 @@ import {
   SolicitudExportacion,
 } from '../../modelos/conciliacion';
 import { ExportacionService } from '../../servicios/exportacion.service';
-import { ImportacionService } from '../../servicios/importacion.service';
+import {
+  ImportacionService,
+  SeleccionImportacion,
+} from '../../servicios/importacion.service';
 
 const API = 'http://127.0.0.1:8000/api';
 
@@ -57,6 +60,15 @@ export class ConciliacionComponent implements OnInit {
   bancos: string[] = [];
   bancoSeleccionado: string = '';
   formatos: string[] = [];
+
+  /**
+   * La cuenta y el banco que se eligieron en /importar-pdf.
+   *
+   * Se guarda en ngOnInit ANTES de vaciar el ImportacionService: limpiar() se
+   * lleva la seleccion tambien, y sin este campo el membrete del papel de
+   * trabajo salia siempre sin numero de cuenta.
+   */
+  seleccionFlujo: SeleccionImportacion | null = null;
 
   // Errores del backend. Se muestran en pantalla en vez de un alert generico:
   // el backend ya devuelve el motivo real (columnas que no entiende, archivo
@@ -394,6 +406,15 @@ export class ConciliacionComponent implements OnInit {
   ngOnInit() {
     this.cargarBancos();
 
+    // Se guarda antes de limpiar() porque el servicio se vacia entero. Es lo
+    // que despues permite que el papel de trabajo salga con la cuenta y el
+    // banco reales del extracto y no con el primer banco de la lista.
+    const seleccion = this.importacion.seleccion();
+    if (seleccion) {
+      this.seleccionFlujo = seleccion;
+      this.bancoSeleccionado = seleccion.banco;
+    }
+
     const delFlujo = this.importacion.movimientos();
     if (delFlujo.length > 0) {
       this.movimientosBanco = delFlujo;
@@ -411,7 +432,9 @@ export class ConciliacionComponent implements OnInit {
         this.bancos = respuesta.bancos ?? [];
         this.formatos = respuesta.formatos ?? [];
         // Preselecciona el primero para no obligar a elegir antes de importar.
-        if (this.bancos.length > 0) {
+        // Solo si nadie eligio uno: este callback llega despues de ngOnInit, y
+        // sin el chequeo pisaba el banco que vino del flujo de importacion.
+        if (this.bancos.length > 0 && !this.bancoSeleccionado) {
           this.bancoSeleccionado = this.bancos[0];
         }
       },
@@ -514,6 +537,12 @@ export class ConciliacionComponent implements OnInit {
         .subscribe({
           next: (respuesta: any) => {
             this.movimientosBanco = respuesta.datos ?? [];
+            // El banco que el backend uso de verdad (GENERICO en la via tabla).
+            // Sin esto el selector seguia mostrando el primero de la lista, que
+            // no tiene relacion con el archivo, y el membrete mentia.
+            if (respuesta.banco) {
+              this.bancoSeleccionado = respuesta.banco;
+            }
             this.cargando = false;
             this.limpiarCruceAnterior();
 
@@ -612,13 +641,15 @@ export class ConciliacionComponent implements OnInit {
   /**
    * Los cuatro campos del membrete.
    *
-   * La cuenta no viene de ningun lado: en esta pantalla el selector de cuenta
-   * todavia esta deshabilitado porque no hay endpoint de cuentas. Se manda la
-   * cuenta del flujo de importacion si todavia la hay, y si no queda vacio
-   * para que el papel salga con el campo sin completar y se note.
+   * La cuenta no sale de esta pantalla: el selector de cuenta de aca sigue
+   * deshabilitado porque no hay endpoint de cuentas. Viene del flujo de
+   * importacion (/importar-pdf), que es donde el usuario la eligio, y se guarda
+   * en seleccionFlujo porque ngOnInit vacia el servicio. Si no hay flujo
+   * (entrar a '/' a mano, o importar un Excel) queda vacia a proposito, para que
+   * el papel salga con el campo sin completar y se note.
    */
   encabezadoDelPapel(): SolicitudExportacion['encabezado'] {
-    const seleccion = this.importacion.seleccion();
+    const seleccion = this.seleccionFlujo;
     const desde = this.fechaFiltroDesde();
     const hasta = this.fechaFiltroHasta();
 
@@ -628,7 +659,7 @@ export class ConciliacionComponent implements OnInit {
       // que inventar un nombre en un papel de trabajo firmado.
       empresa: '',
       banco: this.bancoSeleccionado || seleccion?.banco || '',
-      numeroCuenta: seleccion?.cuentaId ?? '',
+      numero_cuenta: seleccion?.cuentaId ?? '',
       // El periodo sale del rango de fechas de los filtros, que es lo unico
       // que el usuario controla en pantalla. Si no hay fechas, no se inventa.
       periodo: desde && hasta ? `${desde.slice(0, 7)}` : null,
@@ -680,9 +711,36 @@ export class ConciliacionComponent implements OnInit {
     });
   }
 
-  ejecutarAutoconciliacion() {
+  // ------------------------------------------------------------------
+  // Autoconciliar: el cruce contra el mayor de Xubio
+  // ------------------------------------------------------------------
+
+  /**
+   * Que se puede pedir el cruce ahora mismo.
+   *
+   * Sin extracto no hay contra que cruzar. Y mientras hay un cruce en curso el
+   * boton se apaga: tres clicks seguidos son un solo cruce, no tres llamados a
+   * la API de Xubio.
+   */
+  get puedeAutoconciliar(): boolean {
+    return !this.cargando && this.movimientosBanco.length > 0;
+  }
+
+  /** El motivo del boton apagado, escrito en pantalla y no solo en el title. */
+  get motivoAutoconciliarBloqueado(): string {
     if (this.movimientosBanco.length === 0) {
-      this.errorMensaje = 'Primero tenés que importar un extracto bancario.';
+      return 'Primero tenés que importar un extracto bancario.';
+    }
+    return '';
+  }
+
+  ejecutarAutoconciliacion() {
+    // Ya hay un cruce en curso: no se manda otro. Sin este corte el overlay
+    // quedaria yendo y viniendo y el backend recibiria tres crucees iguales.
+    if (this.cargando) return;
+
+    if (this.movimientosBanco.length === 0) {
+      this.errorMensaje = this.motivoAutoconciliarBloqueado;
       return;
     }
 
@@ -729,7 +787,11 @@ export class ConciliacionComponent implements OnInit {
         this.cruceRealizado = false;
         this.errorMensaje = this.mensajeDeError(
           error,
-          'No se pudo cruzar con Xubio. Revisá las credenciales en el backend.'
+          // Este es el respaldo para cuando la respuesta no trae motivo (el
+          // backend caido). Si lo trae, manda el del backend: con un 503 dice
+          // literalmente que faltan XUBIO_CLIENT_ID / XUBIO_CLIENT_SECRET.
+          'No se pudo cruzar con Xubio. Revisá que FastAPI esté corriendo y que ' +
+          'XUBIO_CLIENT_ID y XUBIO_CLIENT_SECRET estén en backend/.env.'
         );
       }
     });

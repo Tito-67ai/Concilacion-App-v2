@@ -22,6 +22,12 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
+    # ng serve agrega 4201, 4202, 4300... cuando el puerto pedido esta ocupado
+    # por otro proyecto, y ahi el navegador frenaba la respuesta con un error
+    # de CORS que no dice ni media palabra del motivo. Cualquier puerto de
+    # localhost sirve igual; un origen que no sea localhost sigue teniendo que
+    # estar escrito en CORS_ORIGINS.
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

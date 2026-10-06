@@ -101,10 +101,21 @@
       <i class="pi pi-undo text-[10px]"></i> Deshacer par
     </button>
     
-    <!-- Botón Autoconciliar -->
-    <button (click)="ejecutarAutoconciliacion()" class="bg-[#e2e6e9] text-[#4a5568] px-4 py-1.5 rounded text-sm flex items-center gap-1 border border-transparent hover:border-gray-400 hover:bg-[#d1d5db] transition-all duration-200">
-      Autoconciliar 🪄
+    <!-- Botón Autoconciliar: cruza el extracto contra el mayor de Xubio. Se
+         apaga mientras corre el cruce (tres clicks son un solo cruce) y si todavia
+         no hay extracto, con el motivo escrito al lado y no solo en el title. -->
+    <button (click)="ejecutarAutoconciliacion()"
+            [disabled]="!puedeAutoconciliar"
+            [title]="motivoAutoconciliarBloqueado || 'Cruzar el extracto contra el mayor de Xubio'"
+            class="bg-[#e2e6e9] text-[#4a5568] px-4 py-1.5 rounded text-sm flex items-center gap-1 border border-transparent hover:border-gray-400 hover:bg-[#d1d5db] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[#e2e6e9]">
+      <i *ngIf="cargando" class="pi pi-spin pi-spinner text-[10px]"></i>
+      {{ cargando ? 'Conciliando…' : 'Autoconciliar 🪄' }}
     </button>
+    <span *ngIf="motivoAutoconciliarBloqueado"
+           class="flex items-center gap-1 text-[11px] text-gray-500 self-center">
+      <i class="pi pi-info-circle text-[10px]"></i>
+      {{ motivoAutoconciliarBloqueado }}
+    </span>
     
     <!-- Botón Importar: el menú con las dos vías vive en su propio componente.
          PDF sale a /importar-pdf; Excel se procesa acá mismo. -->

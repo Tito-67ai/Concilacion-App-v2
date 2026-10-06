@@ -31,7 +31,7 @@ function solicitud(extra: Partial<SolicitudExportacion> = {}): SolicitudExportac
     encabezado: {
       empresa: 'ACME S.A.',
       banco: 'SANT',
-      numeroCuenta: '0001234',
+      numero_cuenta: '0001234',
       periodo: '2026-07',
     },
     ...extra,

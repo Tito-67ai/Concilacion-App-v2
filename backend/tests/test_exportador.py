@@ -146,16 +146,36 @@ def test_las_partidas_de_xubio_caen_en_la_primera_seccion():
 
     assert hoja["A11"].value == "Fecha"
     assert hoja["B11"].value == "Concepto"
-    assert hoja["C11"].value == "Debe"
-    assert hoja["D11"].value == "Haber"
-    assert hoja["E11"].value == "Importe"
+    assert hoja["C11"].value == "Debito en $"
+    assert hoja["D11"].value == "Credito en $"
+    assert hoja["E11"].value is None
 
     assert _celda(hoja, "A12") == date(2026, 7, 4)
     assert hoja["B12"].value == "ALQUILER"
-    assert hoja["C12"].value == 300
-    # El signo del libro mayor va al revés que el del banco: un DEBE de Xubio
-    # es una entrada, y por eso el importe queda positivo.
-    assert hoja["E12"].value == 300
+    # ALQUILER es un DEBE de Xubio, es decir una entrada: el archivo la trae
+    # POSITIVA en "Credito en $" y deja "Debito en $" vacio.
+    assert hoja["C12"].value is None
+    assert hoja["D12"].value == 300
+
+
+def test_una_partida_contable_de_salida_sale_como_debito_negativo():
+    # Un HABER de 51726 es una salida del lado contable: el archivo de Xubio
+    # la trae como "Debito en $ = -51726" y el papel tiene que repetirlo.
+    solicitud = _solicitud(
+        pendientes_xubio=[
+            {
+                "origen": "xubio",
+                "fecha": "2026-07-05",
+                "concepto": "COMPRA PROVEEDOR",
+                "haber": 51726,
+            }
+        ]
+    )
+    hoja = _libro(exportador.exportar(solicitud))["Libro Mayor"]
+
+    assert _celda(hoja, "A12") == date(2026, 7, 5)
+    assert hoja["C12"].value == -51726
+    assert hoja["D12"].value is None
 
 
 def test_las_partidas_del_banco_caen_en_la_segunda_seccion():
@@ -177,14 +197,16 @@ def test_cada_seccion_totaliza_sus_propias_filas():
         ],
         pendientes_xubio=[
             {"origen": "xubio", "fecha": "2026-07-05", "concepto": "ALQUILER", "debe": 300},
-            {"origen": "xubio", "fecha": "2026-07-06", "concepto": "LUZ", "debe": 80},
+            {"origen": "xubio", "fecha": "2026-07-06", "concepto": "COMPRA", "haber": 80},
         ],
     )
     hoja = _libro(exportador.exportar(solicitud))["Libro Mayor"]
 
-    # Seccion de Xubio: filas 12 y 13, total en 14.
-    assert hoja["C14"].value == 380
-    assert hoja["E14"].value == 380
+    # Seccion de Xubio: filas 12 y 13, total en 14. La entrada suma 300 en
+    # "Credito en $" y la salida -80 en "Debito en $".
+    assert hoja["C14"].value == -80
+    assert hoja["D14"].value == 300
+    assert hoja["E14"].value is None
     # Seccion del banco: filas 20 y 21, total en 22.
     assert hoja["C22"].value == 200
     assert hoja["E22"].value == -200

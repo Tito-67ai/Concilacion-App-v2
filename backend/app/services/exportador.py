@@ -57,7 +57,11 @@ SECCIONES_MAYOR = [
     ("Partidas en banco pendientes de registración contable.", 18, 19, 20),
 ]
 
-COLUMNAS_MAYOR = ["Fecha", "Concepto", "Debe", "Haber", "Importe"]
+# Cada seccion manda su propia convencion. Las partidas contables repiten la
+# firma del Excel de Xubio ("Debito en $"/"Credito en $") y las partidas en
+# banco conservan la lectura del extracto (Debe/Haber/Importe).
+COLUMNAS_MAYOR_XUBIO = ["Fecha", "Concepto", "Debito en $", "Credito en $"]
+COLUMNAS_MAYOR_BANCO = ["Fecha", "Concepto", "Debe", "Haber", "Importe"]
 
 # Anchos (caracteres) para las columnas que usa la hoja Libro Mayor.
 ANCHOS_MAYOR = {"A": 15.7, "B": 20.9, "C": 14.0, "D": 14.0, "E": 14.0}
@@ -252,66 +256,128 @@ def _importe_de_par(par: ParConciliado) -> float:
     return _importe(par.importe)
 
 
+def _debito_credito_en(importe: float) -> tuple[float | None, float | None]:
+    """Reparte un importe contable como lo reporta Xubio.
+
+    En el Excel de origen ("Movimientos de CC") la salida va NEGATIVA en
+    "Debito en $" y la entrada va POSITIVA en "Credito en $"; la columna que
+    no corresponde queda vacia, como en el archivo descargado.
+    """
+    if importe < 0:
+        return importe, None
+    if importe > 0:
+        return None, importe
+    return None, None
+
+
+def _filas_partidas_contables(pendientes: list[PendienteExport]) -> list[list]:
+    """Las partidas contables fila por fila, con la firma de Xubio."""
+    filas = []
+    for pendiente in pendientes:
+        debito, credito = _debito_credito_en(_importe_de_pendiente(pendiente, "xubio"))
+        filas.append([_fecha(pendiente.fecha), pendiente.concepto, debito, credito])
+    return filas
+
+
+def _armar_seccion_no_registradas(
+    hoja: Worksheet,
+    seccion: tuple[str, int, int, int],
+    pendientes: list[PendienteExport],
+) -> None:
+    """La seccion "Partidas contables no registradas en banco"."""
+    (titulo_esperado, fila_titulo, fila_encabezado, fila_dato) = seccion
+
+    # El titulo ya viene de la plantilla y es el texto que la auditoria
+    # reconosce. Solo se escribe si el archivo no lo tiene: si alguien
+    # edito la plantilla a mano, el papel sale con su texto, no con el
+    # nuestro pisando encima.
+    celda_titulo = hoja.cell(row=fila_titulo, column=1)
+    if not celda_titulo.value:
+        celda_titulo.value = titulo_esperado
+    celda_titulo.font = FUENTE_TITULO_BLOQUE
+
+    for desplazamiento, titulo in enumerate(COLUMNAS_MAYOR_XUBIO):
+        celda = hoja.cell(row=fila_encabezado, column=1 + desplazamiento, value=titulo)
+        _estilo_encabezado(celda)
+
+    fila = fila_dato
+    for valores in _filas_partidas_contables(pendientes):
+        _escribir_fila(hoja, fila, 1, valores)
+        fila += 1
+
+    if fila > fila_dato:
+        importes = [_importe_de_pendiente(p, "xubio") for p in pendientes]
+        total_debito = round(sum(i for i in importes if i < 0), 2)
+        total_credito = round(sum(i for i in importes if i > 0), 2)
+        hoja.cell(row=fila, column=2, value="Total").alignment = ALINEACION_DERECHA
+        hoja.cell(row=fila, column=3, value=total_debito)
+        hoja.cell(row=fila, column=4, value=total_credito)
+        _escribir_fila_de_totales(hoja, fila, 1, len(COLUMNAS_MAYOR_XUBIO))
+        for desplazamiento in (2, 3):
+            celda = hoja.cell(row=fila, column=1 + desplazamiento)
+            celda.number_format = FORMATO_IMPORTE
+            celda.alignment = ALINEACION_DERECHA
+
+
+def _armar_seccion_pendientes_banco(
+    hoja: Worksheet,
+    seccion: tuple[str, int, int, int],
+    pendientes: list[PendienteExport],
+) -> None:
+    """La seccion "Partidas en banco pendientes de registracion contable"."""
+    (titulo_esperado, fila_titulo, fila_encabezado, fila_dato) = seccion
+
+    celda_titulo = hoja.cell(row=fila_titulo, column=1)
+    if not celda_titulo.value:
+        celda_titulo.value = titulo_esperado
+    celda_titulo.font = FUENTE_TITULO_BLOQUE
+
+    for desplazamiento, titulo in enumerate(COLUMNAS_MAYOR_BANCO):
+        celda = hoja.cell(row=fila_encabezado, column=1 + desplazamiento, value=titulo)
+        _estilo_encabezado(celda)
+
+    fila = fila_dato
+    for pendiente in pendientes:
+        _escribir_fila(
+            hoja,
+            fila,
+            1,
+            [
+                _fecha(pendiente.fecha),
+                pendiente.concepto,
+                _importe(pendiente.debe),
+                _importe(pendiente.haber),
+                _importe_de_pendiente(pendiente, "banco"),
+            ],
+        )
+        fila += 1
+
+    if fila > fila_dato:
+        total_debe = sum(_importe(p.debe) for p in pendientes)
+        total_haber = sum(_importe(p.haber) for p in pendientes)
+        hoja.cell(row=fila, column=2, value="Total").alignment = ALINEACION_DERECHA
+        hoja.cell(row=fila, column=3, value=total_debe)
+        hoja.cell(row=fila, column=4, value=total_haber)
+        hoja.cell(row=fila, column=5, value=_importe_de_lado(total_haber, total_debe, "banco"))
+        _escribir_fila_de_totales(hoja, fila, 1, len(COLUMNAS_MAYOR_BANCO))
+        for desplazamiento in (2, 3, 4):
+            celda = hoja.cell(row=fila, column=1 + desplazamiento)
+            celda.number_format = FORMATO_IMPORTE
+            celda.alignment = ALINEACION_DERECHA
+
+
 def _armar_mayor(hoja: Worksheet, solicitud: SolicitudExportacion) -> None:
     """Las dos secciones del libro mayor: los pendientes, de cada lado."""
     for columna, ancho in ANCHOS_MAYOR.items():
         hoja.column_dimensions[columna].width = ancho
 
-    # El signo del importe depende del lado, y no es una cuestion de gusto: en el
-    # banco un DEBE es una salida (conciliador.py:19-26) y en el mayor de Xubio
-    # un DEBE es una entrada (conciliador.py:31). Si las dos secciones usaran la
-    # convencion del banco, las partidas del mayor saldrian al reves y el papel
-    # de trabajoaria contradecir a la pantalla.
-    secciones = [
-        (SECCIONES_MAYOR[0], solicitud.pendientes_xubio, "xubio"),
-        (SECCIONES_MAYOR[1], solicitud.pendientes_banco, "banco"),
-    ]
-
-    for (
-        (titulo_esperado, fila_titulo, fila_encabezado, fila_dato),
-        pendientes,
-        lado,
-    ) in secciones:
-        # El titulo ya viene de la plantilla y es el texto que la auditoria
-        # reconosce. Solo se escribe si el archivo no lo tiene: si alguien
-        # edito la plantilla a mano, el papel sale con su texto, no con el
-        # nuestro pisando encima.
-        celda_titulo = hoja.cell(row=fila_titulo, column=1)
-        if not celda_titulo.value:
-            celda_titulo.value = titulo_esperado
-        celda_titulo.font = FUENTE_TITULO_BLOQUE
-
-        for desplazamiento, titulo in enumerate(COLUMNAS_MAYOR):
-            celda = hoja.cell(row=fila_encabezado, column=1 + desplazamiento, value=titulo)
-            _estilo_encabezado(celda)
-
-        fila = fila_dato
-        for pendiente in pendientes:
-            _escribir_fila(
-                hoja,
-                fila,
-                1,
-                [
-                    _fecha(pendiente.fecha),
-                    pendiente.concepto,
-                    _importe(pendiente.debe),
-                    _importe(pendiente.haber),
-                    _importe_de_pendiente(pendiente, lado),
-                ],
-            )
-            fila += 1
-
-        if fila > fila_dato:
-            total_debe = sum(_importe(p.debe) for p in pendientes)
-            total_haber = sum(_importe(p.haber) for p in pendientes)
-            hoja.cell(row=fila, column=2, value="Total").alignment = ALINEACION_DERECHA
-            hoja.cell(row=fila, column=3, value=total_debe)
-            hoja.cell(row=fila, column=4, value=total_haber)
-            hoja.cell(row=fila, column=5, value=_importe_de_lado(total_haber, total_debe, lado))
-            _escribir_fila_de_totales(hoja, fila, 1, len(COLUMNAS_MAYOR))
-            for desplazamiento in (2, 3, 4):
-                hoja.cell(row=fila, column=1 + desplazamiento).number_format = FORMATO_IMPORTE
-                hoja.cell(row=fila, column=1 + desplazamiento).alignment = ALINEACION_DERECHA
+    # La seccion de partidas contables repite la firma del Excel de Xubio
+    # ("Debito en $" con la salida negativa, "Credito en $" con la entrada
+    # positiva) para que el papel se compare hoja contra hoja contra el
+    # archivo descargado. La seccion del banco conserva Debe/Haber, que es
+    # como lo trae el extracto.
+    _armar_seccion_no_registradas(hoja, SECCIONES_MAYOR[0], solicitud.pendientes_xubio)
+    _armar_seccion_pendientes_banco(hoja, SECCIONES_MAYOR[1], solicitud.pendientes_banco)
 
 
 def _armar_bloque(

@@ -40,6 +40,19 @@ export interface MovimientoMayor {
   importe?: number;
 }
 
+/** Lo que devuelve POST /conciliacion/mayor. */
+export interface RespuestaMayor {
+  exito: boolean;
+  cantidad_movimientos: number;
+  /**
+   * 'contable' si el archivo era un Libro Mayor (Debe = entrada) o 'cuenta' si
+   * era un extracto de Movimientos de CC (debito = salida). La pantalla lo
+   * muestra para que nadie confunda una convencion con la otra.
+   */
+  convencion: string;
+  datos: MovimientoMayor[];
+}
+
 /** Un par yaconciliado: una fila del banco emparejada con una del mayor. */
 export interface ParConciliado {
   fecha: string | null;

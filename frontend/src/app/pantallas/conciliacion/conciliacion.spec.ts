@@ -354,8 +354,9 @@ describe('ConciliacionComponent', () => {
     expect(component.ultimoPareoManual).not.toBeNull();
 
     component.movimientosBanco = [{ fecha: '2026-07-01', concepto: 'X', debe: 1, haber: 0, saldo: 1 }];
+    component.movimientosMayor = [{ fecha: '2026-07-01', concepto: 'X', debe: 1, haber: 0 }];
     component.ejecutarAutoconciliacion();
-    http.expectOne(`${API}/xubio/cruzar-datos`).flush({
+    http.expectOne(`${API}/conciliacion/cruzar`).flush({
       exito: true,
       tablas: { conciliados: [], pendientes_banco: [], pendientes_xubio: [] },
     });
@@ -365,8 +366,9 @@ describe('ConciliacionComponent', () => {
 
   it('los pares del backend cuentan como automaticos, no como manuales', () => {
     component.movimientosBanco = [{ fecha: '2026-07-01', concepto: 'X', debe: 1, haber: 0, saldo: 1 }];
+    component.movimientosMayor = [{ fecha: '2026-07-01', concepto: 'X', debe: 1, haber: 0 }];
     component.ejecutarAutoconciliacion();
-    http.expectOne(`${API}/xubio/cruzar-datos`).flush({
+    http.expectOne(`${API}/conciliacion/cruzar`).flush({
       exito: true,
       tablas: {
         conciliados: [{ fecha: '2026-07-01', concepto_banco: 'A', concepto_xubio: 'B', cuadra: true }],
@@ -383,28 +385,219 @@ describe('ConciliacionComponent', () => {
     expect(component.puedeAutoconciliar).toBe(false);
     expect(component.motivoAutoconciliarBloqueado).toContain('importar un extracto');
 
+    // Con el extracto solo todavia no hay contra que cruzar: la bandeja
+    // derecha se llena unicamente con el cruce.
     component.movimientosBanco = [{ fecha: '2026-07-01', concepto: 'X', debe: 1, haber: 0, saldo: 1 }];
+    expect(component.puedeAutoconciliar).toBe(false);
+    expect(component.motivoAutoconciliarBloqueado).toContain('Libro Mayor');
+
+    component.movimientosMayor = [{ fecha: '2026-07-01', concepto: 'X', debe: 1, haber: 0 }];
     expect(component.puedeAutoconciliar).toBe(true);
     expect(component.motivoAutoconciliarBloqueado).toBe('');
   });
 
   it('mientras corre el cruce no se manda otro', () => {
     component.movimientosBanco = [{ fecha: '2026-07-01', concepto: 'X', debe: 1, haber: 0, saldo: 1 }];
+    component.movimientosMayor = [{ fecha: '2026-07-01', concepto: 'X', debe: 1, haber: 0 }];
     component.ejecutarAutoconciliacion();
 
     expect(component.cargando).toBe(true);
     expect(component.puedeAutoconciliar).toBe(false);
 
-    // Tres clicks seguidos tienen que ser un solo cruce: cada uno contra la
-    // API de Xubio cuesta plata y tiempo.
+    // Tres clicks seguidos tienen que ser un solo cruce: cada uno arma las
+    // tres bandejas de nuevo y el overlay saltaria como un estroboscopio.
     component.ejecutarAutoconciliacion();
     component.ejecutarAutoconciliacion();
-    http.expectOne(`${API}/xubio/cruzar-datos`).flush({
+    http.expectOne(`${API}/conciliacion/cruzar`).flush({
       exito: true,
       tablas: { conciliados: [], pendientes_banco: [], pendientes_xubio: [] },
     });
 
     expect(component.cargando).toBe(false);
+  });
+
+  // ------------------------------------------------------------------
+  // Libro Mayor: la otra mitad del cruce
+  //
+  // La API de Xubio esta reservada a planes superiores al contratado, asi que
+  // el mayor entra como archivo exportado desde el navegador. Sin ese archivo
+  // la bandeja derecha no se llena nunca, no se puede parear nada a mano y no
+  // hay conciliacion que exportar: por eso es condicion del Autoconciliar.
+  // ------------------------------------------------------------------
+
+  /** El input del Libro Mayor, que vive en la botonera de la pantalla. */
+  function inputMayor(): HTMLInputElement {
+    return fixture.nativeElement.querySelector('#archivoMayor');
+  }
+
+  /** Pone un archivo en el input y dispara change, como al elegirlo. */
+  function elegirMayor(nombre: string) {
+    const input = inputMayor();
+    Object.defineProperty(input, 'files', {
+      value: [archivoConNombre(nombre)],
+      // configurable y writable: el TestBed reutiliza el elemento raiz entre
+      // tests y value='' del componente escribe sobre esta propiedad.
+      configurable: true,
+      writable: true,
+    });
+    input.dispatchEvent(new Event('change'));
+  }
+
+  const FILA_MAYOR = { fecha: '2026-09-01', concepto: 'Cobro cliente', debe: 100, haber: 0 };
+
+  it('el input del Libro Mayor acepta los tres formatos de tabla', async () => {
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(inputMayor().getAttribute('accept')).toBe('.xlsx,.xls,.csv');
+  });
+
+  it('cargar el Libro Mayor lo manda al backend y habilita Autoconciliar', async () => {
+    elegirMayor('mayor-septiembre.xlsx');
+
+    const req = http.expectOne(`${API}/conciliacion/mayor`);
+    expect(req.request.body.get('archivo') instanceof File).toBe(true);
+    req.flush({ exito: true, cantidad_movimientos: 2, datos: [FILA_MAYOR, FILA_MAYOR] });
+    await fixture.whenStable();
+
+    expect(component.movimientosMayor.length).toBe(2);
+    expect(component.nombreMayor).toBe('mayor-septiembre.xlsx');
+    expect(component.infoMensaje).toContain('2 movimientos');
+    expect(component.infoMensaje).not.toContain('el débito es salida');
+    expect(component.puedeAutoconciliar).toBe(false);
+    expect(component.motivoAutoconciliarBloqueado).toContain('importar un extracto');
+  });
+
+  it('un mayor en formato de movimientos de cuenta muestra que el debito es salida', async () => {
+    // Xubio exporta "Movimientos de CC" con Debito/Credito en $: ahi el debito
+    // es plata que SALE, al reves de un Libro Mayor contable. El backend lo
+    // detecta por los encabezados y la pantalla tiene que mostrarlo, o alguien
+    // podria pensar que los signos andan mal.
+    elegirMayor('movimientos-cc.xlsx');
+
+    const req = http.expectOne(`${API}/conciliacion/mayor`);
+    req.flush({
+      exito: true,
+      cantidad_movimientos: 1,
+      convencion: 'cuenta',
+      datos: [FILA_MAYOR],
+    });
+    await fixture.whenStable();
+
+    expect(component.movimientosMayor.length).toBe(1);
+    expect(component.infoMensaje).toContain('el débito es salida');
+    expect(component.infoMensaje).toContain('Ya se puede pedir Autoconciliar');
+  });
+
+  it('un Libro Mayor con otra extension no sale al backend', () => {
+    elegirMayor('mayor.pdf');
+
+    http.expectNone(`${API}/conciliacion/mayor`);
+    expect(component.errorMensaje).toContain('mayor.pdf');
+    expect(component.movimientosMayor.length).toBe(0);
+  });
+
+  it('si el Libro Mayor no se puede leer se ve el motivo y no se pierde el anterior', () => {
+    component.movimientosMayor = [{ fecha: '2026-08-01', concepto: 'X', debe: 1, haber: 0 }];
+    component.nombreMayor = 'agosto.xlsx';
+
+    elegirMayor('septiembre.xlsx');
+    http.expectOne(`${API}/conciliacion/mayor`).flush(
+      { detail: 'El Libro Mayor no tiene columna de Fecha.' },
+      { status: 422, statusText: 'Unprocessable Entity' }
+    );
+
+    expect(component.cargando).toBe(false);
+    expect(component.errorMensaje).toContain('no tiene columna de Fecha');
+    // Tirar una carga buena por un intento fallido deja la pantalla peor.
+    expect(component.movimientosMayor.length).toBe(1);
+    expect(component.errorMensaje).toContain('agosto.xlsx');
+  });
+
+  it('cargar un Libro Mayor nuevo borra el cruce anterior', async () => {
+    component.cruceRealizado = true;
+    component.conciliados = [
+      {
+        fecha: '2026-08-01',
+        concepto_banco: 'X',
+        concepto_xubio: 'Y',
+        debe: 1,
+        haber: 0,
+        saldo: 1,
+        importe: -1,
+        manual: true,
+      },
+    ];
+    component.ultimoPareoManual = { banco: {}, xubio: {} };
+
+    elegirMayor('mayor.xlsx');
+    http.expectOne(`${API}/conciliacion/mayor`).flush({
+      exito: true,
+      cantidad_movimientos: 1,
+      datos: [FILA_MAYOR],
+    });
+    await fixture.whenStable();
+
+    expect(component.cruceRealizado).toBe(false);
+    expect(component.conciliados).toEqual([]);
+    expect(component.ultimoPareoManual).toBeNull();
+  });
+
+  it('Autoconciliar manda los dos lados en el cuerpo', () => {
+    const banco = { fecha: '2026-09-01', concepto: 'COBRO', debe: 0, haber: 100, saldo: 100 };
+    component.movimientosBanco = [banco];
+    component.movimientosMayor = [FILA_MAYOR];
+
+    component.ejecutarAutoconciliacion();
+
+    const req = http.expectOne(`${API}/conciliacion/cruzar`);
+    expect(req.request.body.movimientos_banco).toEqual([banco]);
+    expect(req.request.body.movimientos_xubio).toEqual([FILA_MAYOR]);
+    req.flush({
+      exito: true,
+      tablas: {
+        conciliados: [
+          {
+            fecha: '2026-09-01',
+            concepto_banco: 'COBRO',
+            concepto_xubio: 'Cobro cliente',
+            debe: 0,
+            haber: 100,
+            saldo: 100,
+            importe: 100,
+          },
+        ],
+        pendientes_banco: [],
+        pendientes_xubio: [],
+      },
+    });
+
+    expect(component.cruceRealizado).toBe(true);
+    expect(component.conciliados.length).toBe(1);
+    expect(component.infoMensaje).toContain('1 pares encontrados');
+  });
+
+  it('un cruce sin Libro Mayor no sale al backend y dice que falta', () => {
+    component.movimientosBanco = [{ fecha: '2026-09-01', concepto: 'X', debe: 1, haber: 0, saldo: 1 }];
+
+    component.ejecutarAutoconciliacion();
+
+    http.expectNone(`${API}/conciliacion/cruzar`);
+    expect(component.errorMensaje).toContain('Libro Mayor');
+  });
+
+  it('con el archivo cargado el boton del Libro Mayor muestra cuantas filas trajo', async () => {
+    elegirMayor('mayor.xlsx');
+    http.expectOne(`${API}/conciliacion/mayor`).flush({
+      exito: true,
+      cantidad_movimientos: 1,
+      datos: [FILA_MAYOR],
+    });
+    // En zoneless mutar a mano no repinta: hace falta un evento real del DOM.
+    expect(clickEnTexto('Movimientos a conciliar')).toBe(true);
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.textContent).toContain('Libro Mayor: 1');
   });
 
   // ------------------------------------------------------------------

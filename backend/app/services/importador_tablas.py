@@ -14,6 +14,7 @@ import io
 import logging
 import os
 import unicodedata
+from collections.abc import Callable
 
 import pandas as pd
 
@@ -122,6 +123,33 @@ def _normalizar(texto) -> str:
     return "".join(c for c in sin_acentos.upper() if c.isalnum())
 
 
+def _traducir_columna(nombre) -> tuple[str | None, bool]:
+    """
+    (canonica, coincide_exacta) para un encabezado, o (None, False).
+
+    El segundo valor es el que permite desempatar: "Concepto" es literal y
+    "Cod de Concepto" solo contiene al alias. Cual de los dos gana depende del
+    orden de las columnas en la hoja si no se atiende la diferencia.
+    """
+    n = _normalizar(nombre)
+    if not n:
+        return None, False
+
+    for canonica, alias in ALIAS_COLUMNAS.items():
+        if n in alias:
+            return canonica, True
+
+    mejor = None
+    for canonica, alias in ALIAS_COLUMNAS.items():
+        for nombre_alias in alias:
+            if len(nombre_alias) >= 6 and nombre_alias in n:
+                if mejor is None or len(nombre_alias) > mejor[1]:
+                    mejor = (canonica, len(nombre_alias))
+    if mejor is None:
+        return None, False
+    return mejor[0], False
+
+
 def _columna_canonica(nombre) -> str | None:
     """
     Traduce un encabezado a FECHA/DETALLE/..., o None si no se reconoce.
@@ -130,21 +158,41 @@ def _columna_canonica(nombre) -> str | None:
     largo. Asi "FECHA DE OPERACION BCO" y "SALDO INICIAL" caen igual, sin que
     "DEBE" se coma un "DETALLE DE DEBITO".
     """
-    n = _normalizar(nombre)
-    if not n:
-        return None
+    return _traducir_columna(nombre)[0]
 
-    for canonica, alias in ALIAS_COLUMNAS.items():
-        if n in alias:
-            return canonica
 
-    mejor = None
-    for canonica, alias in ALIAS_COLUMNAS.items():
-        for nombre_alias in alias:
-            if len(nombre_alias) >= 6 and nombre_alias in n:
-                if mejor is None or len(nombre_alias) > mejor[1]:
-                    mejor = (canonica, len(nombre_alias))
-    return mejor[0] if mejor else None
+def mapa_de_columnas(df: pd.DataFrame) -> dict[str, str]:
+    """
+    {nombre original: canonica} de las columnas que se van a renombrar.
+
+    Las que coinciden exactamente ganan sobre las que solo contienen al alias,
+    y entre iguales manda el orden de la hoja. Sin ese orden previo, "Cod de
+    Concepto" (containment de "CONCEPTO") venia antes que "Concepto" (literal)
+    y se quedaba con DETALLE: el concepto que se mostraba en la pantalla y que
+    se exportaba al Excel era el codigo "805", no "CPA. MERPAGO MARKET83".
+    """
+    exactas: dict[str, str] = {}
+    por_contencion: dict[str, str] = {}
+
+    for nombre in df.columns:
+        canonica, exacta = _traducir_columna(nombre)
+        if canonica is None:
+            continue
+        destino = exactas if exacta else por_contencion
+        destino.setdefault(canonica, nombre)
+
+    elegidas = dict(por_contencion)
+    elegidas.update(exactas)
+
+    # Si la hoja ya trae una columna con el nombre canonico ("FECHA" junto a
+    # "Fecha"), la canonica es la que manda y la otra se deja como esta: si se
+    # renombrara habria dos columnas FECHA y _df_to_movimientos se quedaria con
+    # la primera, en silencio.
+    return {
+        nombre: canonica
+        for canonica, nombre in elegidas.items()
+        if canonica not in df.columns or nombre == canonica
+    }
 
 
 def normalizar_columnas(df: pd.DataFrame) -> pd.DataFrame:
@@ -156,18 +204,10 @@ def normalizar_columnas(df: pd.DataFrame) -> pd.DataFrame:
     tenemos claros.
 
     Si dos columnas caerian en la misma canonica ("Fecha operacion" y "Fecha"), se
-    renombra solo la primera. Renombrar las dos deja dos columnas FECHA y
-    _df_to_movimientos lee siempre la primera, en silencio.
+    renombra solo la mejor (ver mapa_de_columnas). Renombrar las dos deja dos
+    columnas FECHA y _df_to_movimientos lee siempre la primera, en silencio.
     """
-    renombres = {}
-    ya_tomadas = set()
-    for nombre in df.columns:
-        canonica = _columna_canonica(nombre)
-        if canonica is None or canonica in ya_tomadas:
-            continue
-        ya_tomadas.add(canonica)
-        if canonica not in df.columns:
-            renombres[nombre] = canonica
+    renombres = {orig: can for orig, can in mapa_de_columnas(df).items() if orig != can}
 
     if renombres:
         logger.info("Columnas normalizadas: %s", renombres)
@@ -175,7 +215,20 @@ def normalizar_columnas(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _fila_del_encabezado(df_crudo: pd.DataFrame):
+def _es_encabezado_de_extracto(canonicas: set) -> bool:
+    # FECHA y DETALLE son las dos que despues exige _df_to_movimientos.
+    return {"FECHA", "DETALLE"} <= canonicas
+
+
+# Que fila de un archivo crudo es la de los nombres de columna. El extracto
+# bancario exige FECHA y DETALLE; el Libro Mayor manda el suyo propio porque un
+# sistema contable puede venir sin columna de detalle (ver importador_mayor).
+EsEncabezado = Callable[[set], bool]
+
+
+def _fila_del_encabezado(
+    df_crudo: pd.DataFrame, es_encabezado: EsEncabezado = _es_encabezado_de_extracto
+):
     """
     Numero de fila donde estan los nombres de columna, o None si la primera fila
     ya los tiene.
@@ -189,22 +242,22 @@ def _fila_del_encabezado(df_crudo: pd.DataFrame):
 
     for indice in range(min(FILAS_PARA_BUSCAR_ENCABEZADO, len(df_crudo))):
         fila = df_crudo.iloc[indice]
-        canonicas = {_columna_canonica(v) for v in fila}
-        # FECHA y DETALLE son las dos que despues exige _df_to_movimientos.
-        if {"FECHA", "DETALLE"} <= canonicas:
+        if es_encabezado({_columna_canonica(v) for v in fila}):
             return indice
     return None
 
 
-def _encabezado_de_filas(filas):
+def _encabezado_de_filas(filas, es_encabezado: EsEncabezado = _es_encabezado_de_extracto):
     for indice in range(min(FILAS_PARA_BUSCAR_ENCABEZADO, len(filas))):
         canonicas = {_columna_canonica(v) for v in filas[indice]} - {None}
-        if {"FECHA", "DETALLE"} <= canonicas:
+        if es_encabezado(canonicas):
             return indice
     return None
 
 
-def _leer_csv(ruta: str) -> pd.DataFrame:
+def _leer_csv(
+    ruta: str, es_encabezado: EsEncabezado = _es_encabezado_de_extracto
+) -> pd.DataFrame:
     """
     Los CSV argentinos vienen en cp1252/latin-1 y separados por ';', pero algunos
     bancos exportan utf-8 con ','.
@@ -246,7 +299,7 @@ def _leer_csv(ruta: str) -> pd.DataFrame:
             if columnas_maximas < 2:
                 continue
 
-            fila_encabezado = _encabezado_de_filas(filas)
+            fila_encabezado = _encabezado_de_filas(filas, es_encabezado)
             if fila_encabezado is None:
                 # No encuentra encabezado en la prueba: tal vez es el caso normal
                 # donde la primera fila es el encabezado
@@ -273,9 +326,11 @@ def _leer_csv(ruta: str) -> pd.DataFrame:
     raise ErrorDeExtraccion(f"No se pudo leer el CSV. Ultimo error: {ultimo_error}")
 
 
-def _leer_xlsx(ruta: str) -> pd.DataFrame:
+def _leer_xlsx(
+    ruta: str, es_encabezado: EsEncabezado = _es_encabezado_de_extracto
+) -> pd.DataFrame:
     crudo = pd.read_excel(ruta, header=None, dtype=object)
-    fila_encabezado = _fila_del_encabezado(crudo)
+    fila_encabezado = _fila_del_encabezado(crudo, es_encabezado)
 
     if fila_encabezado is None:
         # header=0 es el caso normal: ademas sirve para que el error posterior
@@ -288,7 +343,14 @@ def _leer_xlsx(ruta: str) -> pd.DataFrame:
     return pd.read_excel(ruta, header=fila_encabezado, dtype=object)
 
 
-def leer_tabla(ruta: str) -> pd.DataFrame:
+def leer_tabla(ruta: str, es_encabezado: EsEncabezado | None = None) -> pd.DataFrame:
+    """
+    Lee un Excel/CSV con el encabezado que le corresponde.
+
+    es_encabezado decide que fila cuenta como nombres de columna. Por defecto
+    manda la del extracto bancario (FECHA + DETALLE); el Libro Mayor le pasa la
+    suya, porque un contable puede exportar sin columna de detalle.
+    """
     extension = os.path.splitext(ruta)[1].lower()
     if extension not in EXTENSIONES:
         raise ErrorDeExtraccion(
@@ -298,10 +360,13 @@ def leer_tabla(ruta: str) -> pd.DataFrame:
     if not os.path.isfile(ruta):
         raise ErrorDeExtraccion(f"No se encuentra el archivo a procesar: {ruta}")
 
+    coincide = es_encabezado or _es_encabezado_de_extracto
     # El .xls viejo tambien entra por la misma lectura: pandas usa xlrd por
     # debajo y la unica diferencia es el contenedor (OLE2 en vez de zip).
-    lector = _leer_xlsx if extension in (".xlsx", ".xls") else _leer_csv
-    df = lector(ruta)
+    if extension in (".xlsx", ".xls"):
+        df = _leer_xlsx(ruta, coincide)
+    else:
+        df = _leer_csv(ruta, coincide)
 
     if df is None or df.empty:
         raise ErrorDeExtraccion("El archivo no tiene filas.")

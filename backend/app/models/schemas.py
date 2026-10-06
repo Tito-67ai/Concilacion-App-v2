@@ -56,6 +56,43 @@ class RespuestaExtraccion(BaseModel):
 
 
 # ----------------------------------------------------------------------
+# Libro Mayor cargado desde archivo y cruce local
+# ----------------------------------------------------------------------
+#
+# La API de Xubio esta reservada a planes superiores al contratado, asi que el
+# mayor entra como archivo exportado desde el navegador (app/api/rutas/
+# conciliacion.py). Estos schemas son la otra mitad de ese camino.
+
+
+class MovimientoMayor(BaseModel):
+    """Una fila del Libro Mayor: lo que le falta al extracto para poder cruzar."""
+
+    fecha: Optional[date] = None
+    concepto: str = ""
+    debe: float = 0.0
+    haber: float = 0.0
+
+    _fecha = field_validator("fecha", mode="before")(_normalizar_fecha)
+
+
+class RespuestaMayor(BaseModel):
+    exito: bool
+    cantidad_movimientos: int
+    # 'contable' (Debe = entrada) si el archivo era un Libro Mayor, o 'cuenta'
+    # (debito = salida) si era un extracto de Movimientos de CC de Xubio. La
+    # pantalla lo muestra para que nadie confunda una convencion con la otra.
+    convencion: str = "contable"
+    datos: list[MovimientoMayor]
+
+
+class SolicitudCruce(BaseModel):
+    """Las dos bandejas de entrada para cruzar sin pasar por la API de Xubio."""
+
+    movimientos_banco: list[MovimientoBancario]
+    movimientos_xubio: list[MovimientoMayor] = Field(default_factory=list)
+
+
+# ----------------------------------------------------------------------
 # Exportacion del papel de trabajo (FO 02-03)
 # ----------------------------------------------------------------------
 #

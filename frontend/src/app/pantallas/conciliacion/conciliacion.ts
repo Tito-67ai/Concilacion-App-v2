@@ -9,6 +9,7 @@ import {
   MovimientoBanco,
   MovimientoMayor,
   ParConciliado,
+  RespuestaMayor,
   SolicitudExportacion,
 } from '../../modelos/conciliacion';
 import { ExportacionService } from '../../servicios/exportacion.service';
@@ -23,6 +24,10 @@ const API = 'http://127.0.0.1:8000/api';
 // "Procesando..." queda arriba para siempre cuando algo se rompe en el medio y
 // el usuario no tiene forma de saber que paso.
 const TIMEOUT_IMPORTACION_MS = 180000;
+
+// Los tres formatos que se pueden subir. Compartidos por el extracto y por el
+// Libro Mayor: son el mismo archivo de Excel con otras columnas adentro.
+const FORMATOS_TABLA = ['.xlsx', '.xls', '.csv'];
 
 // De que lado de la pantalla sale o cae una fila en el arrastre manual. El cruce
 // manual siempre va de un lado al otro: no tiene sentido soltar una fila del
@@ -76,13 +81,29 @@ export class ConciliacionComponent implements OnInit {
   errorMensaje: string = '';
   infoMensaje: string = '';
 
-  // Las tres bandejas que devuelve POST /xubio/cruzar-datos. El nombre de la
+  // Las tres bandejas que devuelve POST /conciliacion/cruzar. El nombre de la
   // clave importa: el backend responde {exito, resumen, tablas:{...}}, no
   // "movimientos". Leer una clave que no existe deja la tabla vacia sin avisar.
   cruceRealizado: boolean = false;
   conciliados: ParConciliado[] = [];
   pendientesBanco: MovimientoBanco[] = [];
   pendientesXubio: MovimientoMayor[] = [];
+
+  // ------------------------------------------------------------------
+  // Libro Mayor cargado desde archivo
+  //
+  // La API de Xubio esta reservada a planes superiores al contratado, asi que
+  // el mayor se trae como archivo exportado desde el navegador (Excel/CSV) y el
+  // cruce se hace en el backend con el mismo conciliador de siempre.
+  //
+  // Sin este archivo la bandeja derecha no se llena nunca: no hay filas con que
+  // cruzar ni con que parear a mano, y por lo tanto no hay conciliacion que
+  // exportar. Por eso es condicion del boton Autoconciliar, y el motivo del
+  // boton apagado lo dice.
+  // ------------------------------------------------------------------
+  movimientosMayor: MovimientoMayor[] = [];
+  // El nombre del archivo, para que se vea cual quedo cargado si cambia.
+  nombreMayor: string = '';
 
   // El rango de fechas de los filtros. Antes eran dos <input type="date"> con
   // el value puesto en el HTML y sin binding: la pantalla mostraba siempre
@@ -476,9 +497,8 @@ export class ConciliacionComponent implements OnInit {
   private validarExtension(archivo: File): string | null {
     const punto = archivo.name.lastIndexOf('.');
     const extension = punto >= 0 ? archivo.name.slice(punto).toLowerCase() : '';
-    const aceptadas = ['.xlsx', '.xls', '.csv'];
 
-    if (!aceptadas.includes(extension)) {
+    if (!FORMATOS_TABLA.includes(extension)) {
       return (
         `La vía Excel o CSV acepta .xlsx, .xls y .csv, y "${archivo.name}" no es ` +
         'ninguno de esos. Si lo tenés como PDF, usá la vía PDF.'
@@ -565,6 +585,110 @@ export class ConciliacionComponent implements OnInit {
       // esta levantado), cargando queda en true y el overlay tapa la pantalla
       // para siempre.
       console.error("No se pudo enviar el extracto", e);
+      this.cargando = false;
+      this.errorMensaje =
+        'No se pudo enviar el archivo al backend. Revisá que FastAPI esté corriendo en el puerto 8000.';
+    }
+  }
+
+  /**
+   * Eligio el Libro Mayor exportado desde Xubio: se manda apenas se elige,
+   * igual que la via Excel del extracto.
+   *
+   * Es la otra mitad del cruce. La API de Xubio esta reservada a planes
+   * superiores al contratado, asi que este archivo es de donde salen los
+   * movimientos de la bandeja derecha.
+   */
+  cargarMayor(event: Event) {
+    const input = event.target as HTMLInputElement;
+    const archivo = input.files && input.files[0];
+    // Se vacia apenas se lee: si no, elegir el mismo archivo despues de un
+    // error no vuelve a disparar change y el usuario queda sin reintentar.
+    input.value = '';
+    if (!archivo) return;
+
+    const punto = archivo.name.lastIndexOf('.');
+    const extension = punto >= 0 ? archivo.name.slice(punto).toLowerCase() : '';
+    if (!FORMATOS_TABLA.includes(extension)) {
+      this.errorMensaje =
+        `El Libro Mayor se exporta como .xlsx, .xls o .csv, y "${archivo.name}" ` +
+        'no es ninguno de esos.';
+      return;
+    }
+
+    if (this.cargando) return;
+
+    this.cargando = true;
+    this.errorMensaje = '';
+    this.infoMensaje = '';
+
+    const formData = new FormData();
+    formData.append('archivo', archivo, archivo.name);
+
+    try {
+      this.http
+        .post<RespuestaMayor>(`${API}/conciliacion/mayor`, formData)
+        .pipe(
+          timeout(TIMEOUT_IMPORTACION_MS),
+          catchError((error) => {
+            if (error?.name === 'TimeoutError') {
+              error.error = {
+                detail:
+                  `El backend no respondió en ${TIMEOUT_IMPORTACION_MS / 1000} segundos. ` +
+                  'El Libro Mayor del periodo completo puede ser muy pesado.',
+              };
+            }
+            return throwError(() => error);
+          })
+        )
+        .subscribe({
+          next: (respuesta: RespuestaMayor) => {
+            this.movimientosMayor = respuesta.datos ?? [];
+            this.nombreMayor = archivo.name;
+            this.cargando = false;
+            // El cruce que quedaba en pantalla era contra el mayor anterior:
+            // sin borrarlo las bandejas dirian una cosa y este archivo otra.
+            this.limpiarCruceAnterior();
+
+            if (this.movimientosMayor.length === 0) {
+              this.errorMensaje =
+                `El archivo "${archivo.name}" no tiene movimientos del Libro Mayor.`;
+              return;
+            }
+
+            // 'cuenta' (Movimientos de CC de Xubio) va invertido respecto de un
+            // libro contable: el debito es salida. Mostrarlo para que nadie
+            // piense que los signos andan mal.
+            const convencion =
+              respuesta.convencion === 'cuenta'
+                ? ' Convención de cuenta: el débito es salida.'
+                : '';
+            this.infoMensaje =
+              `Libro Mayor cargado: ${this.movimientosMayor.length} movimientos ` +
+              `de ${archivo.name}.${convencion} Ya se puede pedir Autoconciliar.`;
+          },
+          error: (error) => {
+            console.error('Error leyendo el Libro Mayor', error);
+            this.cargando = false;
+            // Se conserva el mayor anterior si lo habia: el archivo que fallo
+            // es el que se informa, pero tirar una carga buena por un intento
+            // fallido deja la pantalla peor de como estaba.
+            this.errorMensaje = this.mensajeDeError(
+              error,
+              'No se pudo leer el Libro Mayor. Revisá que FastAPI esté corriendo en el puerto 8000.'
+            );
+            if (this.movimientosMayor.length > 0) {
+              this.errorMensaje +=
+                ` Se mantiene cargado ${this.nombreMayor} (${this.movimientosMayor.length} movimientos).`;
+            } else {
+              this.nombreMayor = '';
+            }
+          },
+        });
+    } catch (e) {
+      // Si falla antes de salir la request, cargando queda en true y el overlay
+      // tapa la pantalla para siempre.
+      console.error('No se pudo enviar el Libro Mayor', e);
       this.cargando = false;
       this.errorMensaje =
         'No se pudo enviar el archivo al backend. Revisá que FastAPI esté corriendo en el puerto 8000.';
@@ -712,18 +836,22 @@ export class ConciliacionComponent implements OnInit {
   }
 
   // ------------------------------------------------------------------
-  // Autoconciliar: el cruce contra el mayor de Xubio
+  // Autoconciliar: el cruce del extracto contra el Libro Mayor
   // ------------------------------------------------------------------
 
   /**
    * Que se puede pedir el cruce ahora mismo.
    *
-   * Sin extracto no hay contra que cruzar. Y mientras hay un cruce en curso el
-   * boton se apaga: tres clicks seguidos son un solo cruce, no tres llamados a
-   * la API de Xubio.
+   * Sin extracto no hay que cruzar, y sin Libro Mayor no hay contra que: la
+   * bandeja derecha se llena unicamente con el cruce. Y mientras hay un cruce
+   * en curso el boton se apaga: tres clicks seguidos son un solo cruce.
    */
   get puedeAutoconciliar(): boolean {
-    return !this.cargando && this.movimientosBanco.length > 0;
+    return (
+      !this.cargando &&
+      this.movimientosBanco.length > 0 &&
+      this.movimientosMayor.length > 0
+    );
   }
 
   /** El motivo del boton apagado, escrito en pantalla y no solo en el title. */
@@ -731,7 +859,20 @@ export class ConciliacionComponent implements OnInit {
     if (this.movimientosBanco.length === 0) {
       return 'Primero tenés que importar un extracto bancario.';
     }
+    if (this.movimientosMayor.length === 0) {
+      return (
+        'Falta el Libro Mayor: exportalo a Excel/CSV desde Xubio y cargalo ' +
+        'con el botón "Libro Mayor".'
+      );
+    }
     return '';
+  }
+
+  /** Con el archivo cargado se ve cuantas filas hay; sin el, que hace falta. */
+  get etiquetaMayor(): string {
+    return this.movimientosMayor.length > 0
+      ? `Libro Mayor: ${this.movimientosMayor.length}`
+      : 'Libro Mayor';
   }
 
   ejecutarAutoconciliacion() {
@@ -739,7 +880,7 @@ export class ConciliacionComponent implements OnInit {
     // quedaria yendo y viniendo y el backend recibiria tres crucees iguales.
     if (this.cargando) return;
 
-    if (this.movimientosBanco.length === 0) {
+    if (!this.puedeAutoconciliar) {
       this.errorMensaje = this.motivoAutoconciliarBloqueado;
       return;
     }
@@ -748,7 +889,14 @@ export class ConciliacionComponent implements OnInit {
     this.errorMensaje = '';
     this.infoMensaje = '';
 
-    this.http.post(`${API}/xubio/cruzar-datos`, this.movimientosBanco).subscribe({
+    // Los dos lados van en el cuerpo: el mayor viene del archivo que cargo el
+    // usuario, no de la API de Xubio, que esta reservada a planes superiores.
+    this.http
+      .post(`${API}/conciliacion/cruzar`, {
+        movimientos_banco: this.movimientosBanco,
+        movimientos_xubio: this.movimientosMayor,
+      })
+      .subscribe({
       next: (respuesta: any) => {
           // El backend devuelve {exito, resumen, tablas:{conciliados,
           // pendientes_banco, pendientes_xubio}}. Leer respuesta.movimientos
@@ -788,10 +936,10 @@ export class ConciliacionComponent implements OnInit {
         this.errorMensaje = this.mensajeDeError(
           error,
           // Este es el respaldo para cuando la respuesta no trae motivo (el
-          // backend caido). Si lo trae, manda el del backend: con un 503 dice
-          // literalmente que faltan XUBIO_CLIENT_ID / XUBIO_CLIENT_SECRET.
-          'No se pudo cruzar con Xubio. Revisá que FastAPI esté corriendo y que ' +
-          'XUBIO_CLIENT_ID y XUBIO_CLIENT_SECRET estén en backend/.env.'
+          // backend caido). El motivo real del backend manda: un 422 explica
+          // que columnas tenia el archivo del Libro Mayor.
+          'No se pudo cruzar el extracto contra el Libro Mayor. Revisá que ' +
+          'FastAPI esté corriendo en el puerto 8000.'
         );
       }
     });

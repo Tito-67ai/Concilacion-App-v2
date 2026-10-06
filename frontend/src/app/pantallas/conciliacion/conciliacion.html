@@ -101,12 +101,30 @@
       <i class="pi pi-undo text-[10px]"></i> Deshacer par
     </button>
     
-    <!-- Botón Autoconciliar: cruza el extracto contra el mayor de Xubio. Se
-         apaga mientras corre el cruce (tres clicks son un solo cruce) y si todavia
-         no hay extracto, con el motivo escrito al lado y no solo en el title. -->
+    <!-- Botón Libro Mayor: la otra mitad del cruce. La API de Xubio esta
+         reservada a planes superiores, asi que el mayor entra como archivo
+         exportado desde el navegador. Con el archivo cargado se ve cuantas
+         filas trajo, y sin el archivo el boton de al lado no deja avanzar. -->
+    <button (click)="archivoMayor.click()"
+            [disabled]="cargando"
+            [title]="movimientosMayor.length ? nombreMayor : 'Cargar el Libro Mayor exportado a Excel o CSV'"
+            class="bg-[#e2e6e9] text-[#4a5568] px-4 py-1.5 rounded text-sm flex items-center gap-1 border border-transparent hover:border-gray-400 hover:bg-[#d1d5db] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[#e2e6e9]">
+      <i class="pi" [ngClass]="movimientosMayor.length ? 'pi-file-excel text-green-700' : 'pi-file'"></i>
+      {{ etiquetaMayor }}
+    </button>
+    <input #archivoMayor
+           id="archivoMayor"
+           type="file"
+           accept=".xlsx,.xls,.csv"
+           class="hidden"
+           (change)="cargarMayor($event)">
+    
+    <!-- Botón Autoconciliar: cruza el extracto contra el Libro Mayor cargado. Se
+         apaga mientras corre el cruce (tres clicks son un solo cruce) y si falta
+         alguno de los dos lados, con el motivo escrito al lado y no solo en el title. -->
     <button (click)="ejecutarAutoconciliacion()"
             [disabled]="!puedeAutoconciliar"
-            [title]="motivoAutoconciliarBloqueado || 'Cruzar el extracto contra el mayor de Xubio'"
+            [title]="motivoAutoconciliarBloqueado || 'Cruzar el extracto contra el Libro Mayor'"
             class="bg-[#e2e6e9] text-[#4a5568] px-4 py-1.5 rounded text-sm flex items-center gap-1 border border-transparent hover:border-gray-400 hover:bg-[#d1d5db] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[#e2e6e9]">
       <i *ngIf="cargando" class="pi pi-spin pi-spinner text-[10px]"></i>
       {{ cargando ? 'Conciliando…' : 'Autoconciliar 🪄' }}

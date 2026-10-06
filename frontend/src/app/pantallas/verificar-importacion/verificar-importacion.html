@@ -1,0 +1,406 @@
+﻿<div class="mx-auto max-w-6xl">
+  <div class="animate-aparecer-sube">
+
+    <!-- 1. Encabezado -------------------------------------------------------
+         El destino del import (badge) va aca y no abajo de todo a proposito:
+         es el dato contra el que el usuario esta mirando los numeros. -->
+    <header class="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+      <div class="min-w-0">
+        <div class="flex flex-wrap items-center gap-3">
+          <h1 class="text-xl font-semibold text-gray-800 lg:text-2xl">
+            Verificá la información extraída del PDF
+          </h1>
+
+          <span
+            class="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-3 py-1 text-[11px] text-gray-500"
+            [title]="'Se va a importar en ' + destino()"
+          >
+            <i class="pi pi-info-circle text-[10px]"></i>
+            <span class="max-w-[280px] truncate">Se va a importar en {{ destino() || 'la cuenta elegida' }}</span>
+          </span>
+        </div>
+
+        <p class="mt-2 text-sm text-gray-500">
+          Podés editar la información de los movimientos si algo no se importó como esperabas.
+        </p>
+      </div>
+
+      <!-- Llamado a la accion: el enlace de ayuda es lo unico de la pantalla que
+           no lleva a ningun lado de la aplicacion, asi que va aparte del botonera. -->
+      <a
+        [href]="correoSoporte"
+        class="inline-flex shrink-0 items-center gap-2 self-start text-sm text-[#004e82] underline-offset-4 transition-colors duration-200 hover:underline"
+      >
+        <i class="pi pi-flag text-xs"></i>
+        ¿Algo no se leyó bien? Contanos
+      </a>
+    </header>
+
+    <!-- 2. Tarjetas de resumen (KPIs) --------------------------------------
+         Los tres numeros salen de los movimientos de la tabla, asi que cambian
+         mientras se edita: no hay forma de que el total y la tabla digan cosas
+         distintas. -->
+    <section class="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div class="animate-aparecer-sube flex items-center gap-4 rounded border border-gray-200 bg-white px-5 py-4 shadow-sm">
+        <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[#eaf4ec] text-[#4f9d5a]">
+          <i class="pi pi-arrow-up text-base"></i>
+        </span>
+        <div class="min-w-0">
+          <p class="text-xs text-gray-500">Total créditos</p>
+          <p class="tabular-nums text-lg font-semibold text-[#4f9d5a]">{{ formatear(totalCreditos()) }}</p>
+        </div>
+      </div>
+
+      <div
+        class="animate-aparecer-sube flex items-center gap-4 rounded border border-gray-200 bg-white px-5 py-4 shadow-sm"
+        style="animation-delay: 60ms"
+      >
+        <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[#fdecec] text-[#c0392b]">
+          <i class="pi pi-arrow-down text-base"></i>
+        </span>
+        <div class="min-w-0">
+          <p class="text-xs text-gray-500">Total débitos</p>
+          <p class="tabular-nums text-lg font-semibold text-[#c0392b]">{{ formatear(totalDebitos()) }}</p>
+        </div>
+      </div>
+
+      <div
+        class="animate-aparecer-sube flex items-center gap-4 rounded border border-gray-200 bg-white px-5 py-4 shadow-sm"
+        style="animation-delay: 120ms"
+      >
+        <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[#f0f2f5] text-gray-500">
+          <i class="pi pi-arrow-left-arrow-right text-sm"></i>
+        </span>
+        <div class="min-w-0">
+          <p class="text-xs text-gray-500">Diferencias entre créditos y débitos</p>
+          <p class="tabular-nums text-lg font-semibold text-gray-800">{{ formatear(diferencia()) }}</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. Tabla ------------------------------------------------------------
+         Las celdas son inputs: se edita escribiendo sobre el numero, sin entrar
+         en un modo edicion ni buscar un lapiz. -->
+    <section class="overflow-visible rounded border border-gray-200 bg-white shadow-sm">
+
+      <div class="flex items-center justify-between border-b border-gray-100 px-5 py-3">
+        <p class="text-xs text-gray-400">
+          <i class="pi pi-pencil mr-1 text-[10px]"></i>
+          Escribí sobre cualquier celda para corregirla. Enter o Tab para confirmar, Escape para
+          dejar el valor como estaba.
+        </p>
+
+        <!-- Columnas ocultas: sin esto, esconder una columna con los tres
+             puntitos seria una puerta sin salida. -->
+        <div class="relative shrink-0">
+          <button
+            type="button"
+            (click)="alternarMenuColumnas($event)"
+            class="flex items-center gap-1.5 rounded border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 transition-colors duration-200 hover:border-gray-400 hover:bg-[#f4f6f8]"
+          >
+            <i class="pi pi-table text-[10px]"></i>
+            Columnas
+            <i class="pi text-[8px]" [ngClass]="menuColumnasAbierto() ? 'pi-chevron-up' : 'pi-chevron-down'"></i>
+          </button>
+
+          <div *ngIf="menuColumnasAbierto()" (click)="$event.stopPropagation()"
+               class="animate-aparecer-pop absolute right-0 top-full z-40 mt-1 w-44 rounded-lg border border-gray-200 bg-white p-1 shadow-lg">
+            <button
+              *ngFor="let columna of columnas"
+              type="button"
+              (click)="mostrarColumna(columna.clave)"
+              class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-gray-600 transition-colors duration-150 hover:bg-[#f4f6f8]"
+            >
+              <i
+                class="text-[10px]"
+                [ngClass]="estaOculta(columna.clave) ? 'pi pi-minus text-gray-300' : 'pi pi-check text-[#004e82]'"
+              ></i>
+              {{ columna.titulo }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Capa invisible que cierra los menus al clickear afuera -->
+      <div *ngIf="menuAbierto() || menuColumnasAbierto()" (click)="menuAbierto.set(null); menuColumnasAbierto.set(false)"
+           class="fixed inset-0 z-30"></div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full border-collapse text-left text-sm">
+          <thead>
+            <tr class="border-b border-gray-200 bg-[#fafbfc]">
+              <th
+                *ngFor="let columna of columnasVisibles()"
+                class="relative px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-gray-500"
+              >
+                <div class="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    (click)="ordenarPor(columna.clave)"
+                    class="flex items-center gap-1 uppercase transition-colors duration-200 hover:text-[#004e82]"
+                    [title]="'Ordenar por ' + columna.titulo"
+                  >
+                    {{ columna.titulo }}
+                    <i
+                      *ngIf="sentidoOrden(columna.clave)"
+                      class="pi text-[9px] text-[#004e82]"
+                      [ngClass]="sentidoOrden(columna.clave) === 'asc' ? 'pi-sort-up' : 'pi-sort-down'"
+                    ></i>
+                  </button>
+
+                  <!-- Menu de la columna: el de los tres puntitos -->
+                  <button
+                    type="button"
+                    (click)="alternarMenu(columna.clave, $event)"
+                    class="ml-auto rounded p-1 text-gray-400 transition-colors duration-200 hover:bg-gray-100 hover:text-gray-600"
+                    [attr.aria-label]="'Opciones de la columna ' + columna.titulo"
+                  >
+                    <i class="pi pi-ellipsis-v text-[10px]"></i>
+                  </button>
+                </div>
+
+                <div
+                  *ngIf="menuAbierto() === columna.clave"
+                  (click)="$event.stopPropagation()"
+                  class="animate-aparecer-pop absolute left-0 top-full z-40 mt-1 w-48 rounded-lg border border-gray-200 bg-white p-1 shadow-lg"
+                >
+                  <button
+                    type="button"
+                    (click)="ordenarPor(columna.clave)"
+                    class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-gray-600 transition-colors duration-150 hover:bg-[#f4f6f8]"
+                  >
+                    <i class="pi pi-sort-alpha-down text-[10px] text-gray-400"></i>
+                    Ordenar de menor a mayor
+                  </button>
+                  <button
+                    type="button"
+                    (click)="ordenarPor(columna.clave)"
+                    class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-gray-600 transition-colors duration-150 hover:bg-[#f4f6f8]"
+                  >
+                    <i class="pi pi-sort-alpha-up text-[10px] text-gray-400"></i>
+                    Ordenar de mayor a menor
+                  </button>
+                  <div class="my-1 h-px bg-gray-100"></div>
+                  <button
+                    type="button"
+                    (click)="ocultarColumna(columna.clave)"
+                    class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-gray-600 transition-colors duration-150 hover:bg-[#f4f6f8]"
+                  >
+                    <i class="pi pi-eye-slash text-[10px] text-gray-400"></i>
+                    Ocultar columna
+                  </button>
+                </div>
+              </th>
+
+              <th class="w-10 px-2 py-3"><span class="sr-only">Quitar</span></th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <!-- Estado vacio: una fila alta con el motivo, no una tabla pelada -->
+            <tr *ngIf="movimientos().length === 0">
+              <td [attr.colspan]="columnasVisibles().length + 1" class="px-4 py-16 text-center">
+                <i class="pi pi-inbox text-3xl text-gray-300"></i>
+                <p class="mt-3 text-sm text-gray-500">No hay registros para mostrar.</p>
+                <p class="mt-1 text-xs text-gray-400">
+                  El PDF no devolvió movimientos. Agregá uno a mano o volvé a elegir el archivo.
+                </p>
+              </td>
+            </tr>
+
+            <ng-container *ngFor="let mov of filasVisibles(); let i = index">
+              <tr
+                class="group border-b border-gray-100 transition-colors duration-150 focus-within:bg-[#f4f8fb]"
+                [class.bg-red-50]="errores().has(mov.id)"
+              >
+                <!-- Fecha -->
+                <td *ngIf="visible('fecha')" class="px-4 py-2">
+                  <input
+                    #celdaEnEdicion
+                    *ngIf="borrador()?.id === mov.id && borrador()?.campo === 'fecha'; else fechaTexto"
+                    type="text"
+                    class="w-full rounded border border-[#004e82]/40 bg-white px-2 py-1 text-sm text-gray-700 outline-none focus:border-[#004e82]"
+                    [value]="borrador()?.valor"
+                    (input)="editar(mov, 'fecha', $any($event.target).value)"
+                    (keydown.enter)="confirmarBorrador()"
+                    (keydown.escape)="cancelarBorrador()"
+                    (blur)="confirmarBorrador()"
+                    placeholder="AAAA-MM-DD"
+                  />
+                  <ng-template #fechaTexto>
+                    <button
+                      type="button"
+                      (click)="editar(mov, 'fecha', mov.fecha)"
+                      class="tabular-nums w-full rounded px-2 py-1 text-left transition-colors duration-150 hover:bg-gray-100"
+                    >
+                      {{ mov.fecha }}
+                    </button>
+                  </ng-template>
+                </td>
+
+                <!-- Concepto -->
+                <td *ngIf="visible('concepto')" class="px-4 py-2">
+                  <input
+                    #celdaEnEdicion
+                    *ngIf="borrador()?.id === mov.id && borrador()?.campo === 'concepto'; else conceptoTexto"
+                    type="text"
+                    class="w-full rounded border border-[#004e82]/40 bg-white px-2 py-1 text-sm text-gray-700 outline-none focus:border-[#004e82]"
+                    [value]="borrador()?.valor"
+                    (input)="editar(mov, 'concepto', $any($event.target).value)"
+                    (keydown.enter)="confirmarBorrador()"
+                    (keydown.escape)="cancelarBorrador()"
+                    (blur)="confirmarBorrador()"
+                    placeholder="Concepto del movimiento"
+                  />
+                  <ng-template #conceptoTexto>
+                    <button
+                      type="button"
+                      (click)="editar(mov, 'concepto', mov.concepto)"
+                      class="w-full rounded px-2 py-1 text-left transition-colors duration-150 hover:bg-gray-100"
+                    >
+                      {{ mov.concepto || '—' }}
+                    </button>
+                  </ng-template>
+                </td>
+
+                <!-- Credito -->
+                <td *ngIf="visible('credito')" class="px-4 py-2 text-right">
+                  <input
+                    #celdaEnEdicion
+                    *ngIf="borrador()?.id === mov.id && borrador()?.campo === 'credito'; else creditoTexto"
+                    type="text"
+                    inputmode="decimal"
+                    class="tabular-nums w-full rounded border border-[#004e82]/40 bg-white px-2 py-1 text-right text-sm text-[#4f9d5a] outline-none focus:border-[#004e82]"
+                    [value]="valorEditable(mov.haber)"
+                    (input)="editar(mov, 'credito', $any($event.target).value)"
+                    (keydown.enter)="confirmarBorrador()"
+                    (keydown.escape)="cancelarBorrador()"
+                    (blur)="confirmarBorrador()"
+                    placeholder="0,00"
+                  />
+                  <ng-template #creditoTexto>
+                    <button
+                      type="button"
+                      (click)="editar(mov, 'credito', valorEditable(mov.haber))"
+                      class="tabular-nums w-full rounded px-2 py-1 text-right transition-colors duration-150 hover:bg-gray-100"
+                    >
+                      {{ formatear(mov.haber) }}
+                    </button>
+                  </ng-template>
+                </td>
+
+                <!-- Debito -->
+                <td *ngIf="visible('debito')" class="px-4 py-2 text-right">
+                  <input
+                    #celdaEnEdicion
+                    *ngIf="borrador()?.id === mov.id && borrador()?.campo === 'debito'; else debitoTexto"
+                    type="text"
+                    inputmode="decimal"
+                    class="tabular-nums w-full rounded border border-[#004e82]/40 bg-white px-2 py-1 text-right text-sm text-[#c0392b] outline-none focus:border-[#004e82]"
+                    [value]="valorEditable(mov.debe)"
+                    (input)="editar(mov, 'debito', $any($event.target).value)"
+                    (keydown.enter)="confirmarBorrador()"
+                    (keydown.escape)="cancelarBorrador()"
+                    (blur)="confirmarBorrador()"
+                    placeholder="0,00"
+                  />
+                  <ng-template #debitoTexto>
+                    <button
+                      type="button"
+                      (click)="editar(mov, 'debito', valorEditable(mov.debe))"
+                      class="tabular-nums w-full rounded px-2 py-1 text-right transition-colors duration-150 hover:bg-gray-100"
+                    >
+                      {{ formatear(mov.debe) }}
+                    </button>
+                  </ng-template>
+                </td>
+
+                <!-- Quitar la fila: hay que poder deshacer el error del extractor -->
+                <td class="px-2 py-2 text-right">
+                  <button
+                    type="button"
+                    (click)="quitarMovimiento(mov.id)"
+                    class="rounded p-1.5 text-gray-300 opacity-0 transition-all duration-200 hover:bg-red-50 hover:text-[#c0392b] focus:opacity-100 group-hover:opacity-100"
+                    [class.opacity-100]="borrador()?.id === mov.id"
+                    [attr.aria-label]="'Quitar el movimiento ' + (i + 1)"
+                  >
+                    <i class="pi pi-trash text-xs"></i>
+                  </button>
+                </td>
+              </tr>
+
+              <!-- Errores de la fila -->
+              <tr *ngIf="errores().has(mov.id)" class="bg-red-50">
+                <td [attr.colspan]="columnasVisibles().length + 1" class="px-4 pb-3 pt-0">
+                  <p class="text-xs text-red-600">
+                    <i class="pi pi-exclamation-circle mr-1 text-[10px]"></i>
+                    {{ errores().get(mov.id)?.join(' ') }}
+                  </p>
+                </td>
+              </tr>
+
+              <!-- Error de la celda que se esta por confirmar -->
+              <tr *ngIf="borrador()?.id === mov.id && errorCelda()" class="bg-red-50">
+                <td [attr.colspan]="columnasVisibles().length + 1" class="px-4 pb-3 pt-0">
+                  <p class="text-xs text-red-600">{{ errorCelda() }}</p>
+                </td>
+              </tr>
+            </ng-container>
+          </tbody>
+
+          <!-- Pie de tabla -->
+          <tfoot>
+            <tr class="border-t border-gray-200 bg-[#fafbfc] text-xs text-gray-500">
+              <td [attr.colspan]="columnasVisibles().length + 1" class="px-4 py-2.5">
+                Movimientos a importar: {{ movimientos().length }}
+                <span *ngIf="hayErrores()" class="ml-2 text-red-600">
+                  <i class="pi pi-exclamation-triangle mr-1 text-[10px]"></i>
+                  Corregí las filas marcadas antes de confirmar
+                </span>
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div class="border-t border-gray-100 px-5 py-3">
+        <button
+          type="button"
+          (click)="agregarMovimiento()"
+          class="rounded border border-[#004e82] px-3.5 py-1.5 text-sm text-[#004e82] transition-all duration-200 hover:bg-[#004e82] hover:text-white"
+        >
+          <i class="pi pi-plus mr-1 text-xs"></i> Agregar movimiento
+        </button>
+      </div>
+    </section>
+
+    <!-- 4. Botones de accion ----------------------------------------------- -->
+    <footer class="mt-6 flex flex-col-reverse items-stretch gap-2 sm:flex-row sm:items-center sm:justify-end">
+      <button
+        type="button"
+        (click)="cancelar()"
+        class="rounded border border-gray-400 px-5 py-2 text-sm text-gray-600 transition-all duration-200 hover:border-gray-600 hover:bg-gray-50"
+      >
+        Cancelar
+      </button>
+
+      <button
+        type="button"
+        (click)="confirmar()"
+        [disabled]="!puedeConfirmar()"
+        class="rounded px-5 py-2 text-sm transition-all duration-200"
+        [ngClass]="
+          puedeConfirmar()
+            ? 'bg-[#004e82] text-white hover:bg-[#003a61]'
+            : 'cursor-not-allowed bg-gray-200 text-gray-400'
+        "
+      >
+        Confirmar importación
+      </button>
+    </footer>
+
+    <p *ngIf="!puedeConfirmar() && movimientos().length === 0" class="mt-2 text-right text-xs text-gray-400">
+      No hay movimientos para importar.
+    </p>
+  </div>
+</div>

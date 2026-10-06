@@ -338,22 +338,24 @@ def test_el_frontend_acepta_los_cuatro_formatos():
     # Si el input no declara .xls, el usuario no puede seleccionar el archivo
     # aunque el backend lo sepa leer.
     #
-    # Los accept viven en el TS desde que el boton Importar se abrio en dos vias
-    # (PDF y Excel/CSV). La guarda busca las declaraciones "acepta: '...'" y no
-    # una busqueda de texto libre: los nombres de los formatos aparecen
-    # tambien en los mensajes de error de la pantalla, asi que un "in" a secas
-    # daria verde aunque el accept no los tuviera.
+    # Los accept ya no viven en conciliacion.ts: cuando el boton Importar se
+    # abrio en dos vias, cada input quedo en la pantalla que lo usa (el de tabla
+    # en el menu, el de PDF en /importar-pdf). Se buscan los atributos accept=
+    # de los templates en vez de una declaracion "acepta: '...'" que ya no esta.
+    # Tampoco se hace un "in" a secas sobre todo el texto: los nombres de los
+    # formatos aparecen en los mensajes de error de la pantalla y el test daria
+    # verde aunque ningun input los declarara.
     raiz = Path(__file__).resolve().parents[2]
-    fuente = raiz / "frontend" / "src" / "app" / "pantallas" / "conciliacion"
-    if not (fuente / "conciliacion.ts").exists():
+    app_dir = raiz / "frontend" / "src" / "app"
+    if not (app_dir / "pantallas" / "conciliacion" / "conciliacion.ts").exists():
         pytest.skip("el frontend no esta en este checkout")
 
-    codigo = (fuente / "conciliacion.ts").read_text(encoding="utf-8")
-    declarados = set()
-    for accept in re.findall(r"acepta:\s*'([^']+)'", codigo):
-        declarados.update(acepta.strip() for acepta in accept.split(","))
+    declarados: set[str] = set()
+    for template in app_dir.rglob("*.html"):
+        for accept in re.findall(r"accept=\"([^\"]+)\"", template.read_text(encoding="utf-8")):
+            declarados.update(acepta.strip() for acepta in accept.split(","))
 
-    assert declarados, "no se encontro ninguna declaracion 'acepta:' en el frontend"
+    assert declarados, "no se encontro ningun atributo accept= en el frontend"
 
     for extension in (".pdf", ".xlsx", ".xls", ".csv"):
         assert extension in declarados, (

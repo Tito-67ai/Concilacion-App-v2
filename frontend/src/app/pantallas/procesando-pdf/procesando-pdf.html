@@ -1,0 +1,190 @@
+<div class="flex min-h-screen items-center justify-center bg-[#f4f6f8] p-6">
+  <div class="w-full max-w-2xl animate-aparecer-sube">
+
+    <!-- Tarjeta de estado -->
+    <div class="overflow-hidden rounded border border-gray-200 bg-white shadow-sm">
+
+      <!-- Barra de progreso -->
+      <div class="relative h-1 w-full bg-gray-100">
+        <div
+          class="h-full transition-all duration-700 ease-out"
+          [style.width.%]="progreso()"
+          [ngClass]="fallo() ? 'bg-[#c0392b]' : 'bg-[#004e82]'"
+        ></div>
+        <!-- Barrido de luz mientras sigue trabajando -->
+        <div *ngIf="!finalizado() && !fallo()" class="pointer-events-none absolute inset-0 overflow-hidden">
+          <div class="animate-barrido h-full w-1/3 bg-gradient-to-r from-transparent via-white/70 to-transparent"></div>
+        </div>
+      </div>
+
+      <!-- Encabezado -->
+      <div class="flex items-start gap-4 border-b border-gray-100 p-6">
+        <span
+          class="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg transition-colors duration-500"
+          [ngClass]="
+            finalizado()
+              ? 'bg-[#eaf4ec] text-[#4f9d5a]'
+              : fallo()
+                ? 'bg-[#fdecec] text-[#c0392b]'
+                : 'bg-[#fdecec] text-[#c0392b]'
+          "
+        >
+          <i
+            class="pi pi-file-pdf text-xl"
+            [ngClass]="!finalizado() && !fallo() ? 'animate-pulso-suave' : ''"
+          ></i>
+        </span>
+
+        <div class="min-w-0 flex-1">
+          <h1 class="text-lg font-semibold text-gray-800">
+            <ng-container *ngIf="finalizado()">Listo, ya analizamos tu PDF</ng-container>
+            <ng-container *ngIf="fallo()">No pudimos leer el PDF</ng-container>
+            <ng-container *ngIf="!finalizado() && !fallo()">Estamos analizando tu PDF</ng-container>
+          </h1>
+          <p class="mt-0.5 truncate text-sm text-gray-500">{{ archivoNombre() }}</p>
+          <p *ngIf="!finalizado() && !fallo()" class="mt-1 text-xs text-gray-400">
+            Puede demorar unos minutos. No cierres esta pantalla.
+          </p>
+        </div>
+
+        <span
+          *ngIf="!fallo()"
+          class="shrink-0 rounded-full bg-[#f0f2f5] px-3 py-1 text-[11px] tabular-nums text-gray-500"
+          title="Tiempo transcurrido"
+        >
+          <i class="pi pi-clock mr-1 text-[10px]"></i>{{ tiempoTranscurrido() }}
+        </span>
+      </div>
+
+      <!-- Stepper -->
+      <ol class="p-6">
+        <li
+          *ngFor="let paso of pasos; let i = index; let ultimo = last"
+          class="relative flex gap-4"
+          [class.pb-7]="!ultimo"
+        >
+          <!-- Linea que conecta los pasos -->
+          <span
+            *ngIf="!ultimo"
+            class="absolute left-[15px] top-9 h-[calc(100%-2.25rem)] w-px transition-colors duration-500"
+            [ngClass]="estados()[i] === 'completado' ? 'bg-[#004e82]' : 'bg-gray-200'"
+          ></span>
+
+          <!-- Circulo de estado -->
+          <span class="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full">
+            <!-- Completado -->
+            <ng-container *ngIf="estados()[i] === 'completado'">
+              <span class="flex h-8 w-8 items-center justify-center rounded-full bg-[#9ecb9b] shadow-sm">
+                <i class="pi pi-check text-xs text-white"></i>
+              </span>
+            </ng-container>
+
+            <!-- Error -->
+            <ng-container *ngIf="estados()[i] === 'error'">
+              <span class="flex h-8 w-8 items-center justify-center rounded-full bg-[#c0392b] shadow-sm">
+                <i class="pi pi-times text-xs text-white"></i>
+              </span>
+            </ng-container>
+
+            <!-- Cargando -->
+            <ng-container *ngIf="estados()[i] === 'cargando'">
+              <span class="absolute inset-0 animate-pulse rounded-full bg-[#004e82]/10"></span>
+              <span
+                class="relative flex h-8 w-8 items-center justify-center rounded-full border-2 border-[#004e82]/40 bg-white"
+              >
+                <i class="pi pi-spin pi-spinner text-sm text-[#004e82]"></i>
+              </span>
+            </ng-container>
+
+            <!-- Pendiente -->
+            <ng-container *ngIf="estados()[i] === 'pendiente'">
+              <span
+                class="flex h-8 w-8 items-center justify-center rounded-full border-2 border-gray-200 bg-white"
+              >
+                <span class="h-2 w-2 rounded-full bg-gray-200"></span>
+              </span>
+            </ng-container>
+          </span>
+
+          <!-- Texto del paso -->
+          <div class="min-w-0 flex-1 pt-1">
+            <p
+              class="text-sm transition-colors duration-300"
+              [ngClass]="
+                estados()[i] === 'pendiente'
+                  ? 'text-gray-400'
+                  : estados()[i] === 'error'
+                    ? 'font-medium text-red-600'
+                    : 'font-medium text-gray-700'
+              "
+            >
+              {{ paso.titulo }}
+            </p>
+            <p
+              *ngIf="estados()[i] !== 'pendiente'"
+              class="animate-aparecer-sube mt-0.5 text-xs"
+              [ngClass]="estados()[i] === 'error' ? 'text-red-500' : 'text-gray-400'"
+            >
+              {{ estados()[i] === 'cargando' ? paso.haciendo : paso.detalle }}
+            </p>
+          </div>
+
+          <!-- Etiqueta lateral -->
+          <div class="shrink-0 pt-1.5 text-right">
+            <span *ngIf="estados()[i] === 'completado'" class="text-[11px] text-[#4f9d5a]">Listo</span>
+            <span *ngIf="estados()[i] === 'error'" class="text-[11px] text-red-600">Falló</span>
+            <span
+              *ngIf="estados()[i] === 'cargando'"
+              class="animate-pulso-suave text-[11px] text-[#004e82]"
+            >
+              Procesando…
+            </span>
+          </div>
+        </li>
+      </ol>
+
+      <!-- Error real del backend: el motivo, no un "ocurrio un error" -->
+      <div
+        *ngIf="fallo()"
+        class="animate-aparecer-sube border-t border-red-100 bg-red-50 px-6 py-4"
+      >
+        <div class="flex items-start gap-2">
+          <i class="pi pi-exclamation-triangle mt-0.5 text-sm text-red-600"></i>
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-medium text-red-700">{{ errorMensaje() }}</p>
+            <p class="mt-1 text-xs text-red-500">
+              No se cargó ningún movimiento: los archivos con problemas se leen de nuevo desde el
+              portal del banco o se descargan como Excel.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Pie: en proceso -->
+      <div
+        *ngIf="!finalizado() && !fallo()"
+        class="flex items-center justify-between gap-4 border-t border-gray-100 bg-[#fafbfc] px-6 py-4"
+      >
+        <p class="text-xs text-gray-400">
+          <ng-container *ngIf="envioProgreso() >= 0">
+            Enviado {{ envioProgreso() }}% ·
+          </ng-container>
+          {{ cuentaNombre() }} · extractor {{ bancoNombre() }}
+        </p>
+        <button
+          type="button"
+          (click)="cancelar()"
+          class="shrink-0 rounded px-3 py-1.5 text-sm text-[#4a5568] transition-all duration-200 hover:bg-white hover:text-[#004e82]"
+        >
+          <i class="pi pi-times mr-1 text-[10px]"></i>
+          Cancelar
+        </button>
+      </div>
+    </div>
+
+    <p class="mt-4 text-center text-xs text-gray-400">
+      <i class="pi pi-lock mr-1 text-[10px]"></i>
+      El archivo se procesa de forma segura y no se guarda en tu equipo.
+    </p>
+  </div>
+</div>

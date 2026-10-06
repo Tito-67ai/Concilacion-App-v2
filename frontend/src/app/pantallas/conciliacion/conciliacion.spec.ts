@@ -1,17 +1,22 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting, HttpTestingController } from '@angular/common/http/testing';
+import { provideRouter, Router } from '@angular/router';
 
 import { ConciliacionComponent } from './conciliacion';
+import { ImportacionService } from '../../servicios/importacion.service';
+
+const API = 'http://127.0.0.1:8000/api';
 
 describe('ConciliacionComponent', () => {
   let component: ConciliacionComponent;
   let fixture: ComponentFixture<ConciliacionComponent>;
   let http: HttpTestingController;
+  let importacion: ImportacionService;
 
   /** Arma un File con el nombre que se le pida (el constructor no acepta props). */
   function archivoConNombre(nombre: string): File {
-    return new File([new Uint8Array([37, 80, 68, 70])], nombre);
+    return new File([new Uint8Array([80, 75, 3, 4])], nombre);
   }
 
   beforeEach(async () => {
@@ -19,16 +24,19 @@ describe('ConciliacionComponent', () => {
       imports: [ConciliacionComponent],
       providers: [
         provideHttpClient(),
-        provideHttpClientTesting()
+        provideHttpClientTesting(),
+        provideRouter([])
       ]
     }).compileComponents();
 
+    importacion = TestBed.inject(ImportacionService);
+    importacion.limpiar();
     fixture = TestBed.createComponent(ConciliacionComponent);
     component = fixture.componentInstance;
     http = TestBed.inject(HttpTestingController);
     await fixture.whenStable();
     // El componente pide la lista de bancos al arrancar.
-    http.expectOne('http://127.0.0.1:8000/api/extractos/bancos').flush({
+    http.expectOne(`${API}/extractos/bancos`).flush({
       bancos: ['SANT', 'ICBC', 'GENERICO'],
       formatos: ['pdf', 'tabla']
     });
@@ -41,347 +49,539 @@ describe('ConciliacionComponent', () => {
   });
 
   // ------------------------------------------------------------------
-  // Las dos vias de importacion
+  // Importar: el boton que ofrece las dos vias es del ImportarMenuComponent
   // ------------------------------------------------------------------
 
-  it('arranca en la pantalla de conciliacion, no en el apartado de carga', () => {
-    expect(component.modoImportacion).toBeNull();
-    expect(component.enApartadoDeImportacion).toBe(false);
+  it('el boton Importar muestra las dos vias en pantalla', async () => {
+    expect(clickEnTexto('Importar')).toBe(true);
+    await fixture.whenStable();
+
+    const texto = fixture.nativeElement.textContent;
+    expect(texto).toContain('Importar vía Excel');
+    expect(texto).toContain('Importar vía PDF');
   });
 
-  it('ofrece exactamente dos vias, PDF y Excel', () => {
-    expect(component.opcionesImportacion.map((o) => o.modo)).toEqual(['pdf', 'tabla']);
-    expect(component.opcionesImportacion[0].acepta).toBe('.pdf');
-    expect(component.opcionesImportacion[1].acepta).toBe('.xlsx,.xls,.csv');
+  it('elegir la via PDF sale a su propia pantalla, no procesa acá', async () => {
+    const navegar = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+
+    await abrirMenuImportar();
+    expect(clickEnTexto('Importar vía PDF')).toBe(true);
+    await fixture.whenStable();
+
+    expect(navegar).toHaveBeenCalledWith(['/importar-pdf']);
+    // No se manda nada al backend desde la conciliacion en esta via.
+    http.expectNone(`${API}/extractos/procesar`);
   });
 
-  it('elegir una via abre el apartado de carga de esa via', () => {
-    component.elegirModo('tabla');
-
-    expect(component.modoImportacion).toBe('tabla');
-    expect(component.enApartadoDeImportacion).toBe(true);
-    expect(component.opcionActiva?.acepta).toBe('.xlsx,.xls,.csv');
+  it('el input de Excel acepta solo los tres formatos de tabla', async () => {
+    await abrirMenuImportar();
+    const input = fixture.nativeElement.querySelector('#importarExcel');
+    expect(input.getAttribute('accept')).toBe('.xlsx,.xls,.csv');
   });
 
-  it('elegir una via cierra el menu', () => {
-    component.menuImportarAbierto = true;
-    component.elegirModo('pdf');
+  it('elegir un Excel lo manda al backend con GENERICO y sin pedir banco', async () => {
+    await abrirMenuImportar();
+    const input = fixture.nativeElement.querySelector('#importarExcel');
+    Object.defineProperty(input, 'files', {
+      value: [archivoConNombre('julio.xlsx')],
+      // configurable: el TestBed reutiliza el elemento raiz entre tests, y sin
+      // esto el segundo test que redefine "files" revienta.
+      configurable: true,
+    });
+    input.dispatchEvent(new Event('change'));
 
-    expect(component.menuImportarAbierto).toBe(false);
-  });
-
-  it('volver cierra el apartado y limpia los mensajes', () => {
-    component.elegirModo('pdf');
-    component.archivoSeleccionado = archivoConNombre('extracto.pdf');
-    component.errorMensaje = 'algo';
-
-    component.cerrarApartadoImportacion();
-
-    expect(component.modoImportacion).toBeNull();
-    expect(component.archivoSeleccionado).toBeNull();
-    expect(component.errorMensaje).toBe('');
-  });
-
-  it('cambiar de via descarta el archivo que se habia elegido', () => {
-    // Si no, el PDF queda elegido al pasar a la via Excel y se manda con el
-    // filtro equivocado.
-    component.elegirModo('pdf');
-    component.archivoSeleccionado = archivoConNombre('extracto.pdf');
-
-    component.elegirModo('tabla');
-
-    expect(component.archivoSeleccionado).toBeNull();
-  });
-
-  // ------------------------------------------------------------------
-  // El filtro por extension
-  // ------------------------------------------------------------------
-
-  it('deja elegir un PDF en la via PDF', () => {
-    component.elegirModo('pdf');
-    const input = document.createElement('input');
-    input.type = 'file';
-    Object.defineProperty(input, 'files', { value: [archivoConNombre('julio.pdf')] });
-
-    component.capturarArchivo({ target: input });
-
-    expect(component.archivoSeleccionado?.name).toBe('julio.pdf');
-    expect(component.errorMensaje).toBe('');
-  });
-
-  it('rechaza un Excel en la via PDF y dice cual es la otra via', () => {
-    component.elegirModo('pdf');
-    const input = document.createElement('input');
-    input.type = 'file';
-    Object.defineProperty(input, 'files', { value: [archivoConNombre('julio.xlsx')] });
-
-    component.capturarArchivo({ target: input });
-
-    expect(component.archivoSeleccionado).toBeNull();
-    expect(component.errorMensaje).toContain('Excel');
-  });
-
-  it('acepta los tres formatos de tabla en la via Excel', () => {
-    component.elegirModo('tabla');
-
-    for (const nombre of ['julio.xlsx', 'julio.xls', 'julio.CSV']) {
-      const input = document.createElement('input');
-      input.type = 'file';
-      Object.defineProperty(input, 'files', { value: [archivoConNombre(nombre)] });
-
-      component.capturarArchivo({ target: input });
-
-      expect(component.archivoSeleccionado?.name).toBe(nombre);
-      expect(component.errorMensaje).toBe('');
-    }
-  });
-
-  it('rechaza un PDF en la via Excel', () => {
-    component.elegirModo('tabla');
-    const input = document.createElement('input');
-    input.type = 'file';
-    Object.defineProperty(input, 'files', { value: [archivoConNombre('julio.pdf')] });
-
-    component.capturarArchivo({ target: input });
-
-    expect(component.archivoSeleccionado).toBeNull();
-    expect(component.errorMensaje).toContain('PDF');
-  });
-
-  it('un archivo sin extension no pasa', () => {
-    component.elegirModo('pdf');
-    const input = document.createElement('input');
-    input.type = 'file';
-    Object.defineProperty(input, 'files', { value: [archivoConNombre('extracto')] });
-
-    component.capturarArchivo({ target: input });
-
-    expect(component.archivoSeleccionado).toBeNull();
-    expect(component.errorMensaje).not.toBe('');
-  });
-
-  // ------------------------------------------------------------------
-  // Drag and drop usa el mismo camino que el click
-  // ------------------------------------------------------------------
-
-  it('soltar un archivo lo elige igual que hacer clic', () => {
-    component.elegirModo('pdf');
-
-    component.alSoltarArchivo({
-      preventDefault: () => {},
-      stopPropagation: () => {},
-      dataTransfer: { files: [archivoConNombre('arrastrado.pdf')] }
-    } as any);
-
-    expect(component.archivoSeleccionado?.name).toBe('arrastrado.pdf');
-  });
-
-  it('arrastrar sobre la zona la marca, salir la desmarca', () => {
-    component.elegirModo('pdf');
-    const evento = { preventDefault: () => {}, stopPropagation: () => {} };
-
-    component.alArrastrarSobre(evento as any);
-    expect(component.arrastrandoArchivo).toBe(true);
-
-    component.alArrastrarSalir(evento as any);
-    expect(component.arrastrandoArchivo).toBe(false);
-  });
-
-  it('mientras esta cargando no acepta archivos', () => {
-    component.elegirModo('pdf');
-    component.cargando = true;
-
-    component.alSoltarArchivo({
-      preventDefault: () => {},
-      stopPropagation: () => {},
-      dataTransfer: { files: [archivoConNombre('tarde.pdf')] }
-    } as any);
-
-    expect(component.archivoSeleccionado).toBeNull();
-  });
-
-// ------------------------------------------------------------------
-// Que se vea de verdad
-//
-// Los tests de arriba mueven el estado del componente a mano, asi que no
-// renderizan. Con el builder zoneless de Angular 22, mutar una propiedad y
-// llamar a detectChanges() no repinta: hace falta un evento real del DOM, que si
-// es un origen de notificacion. Por eso estos tests clickean la pantalla como
-// lo haria el usuario. Tambien es lo que atrapa un error de template (un
-// ng-container sin cerrar, un *ngIf al reves) que si no revienta recien al
-// abrir la aplicacion.
-// ------------------------------------------------------------------
-
-/** Click en el boton cuyo texto contenga el texto buscado. */
-function clickEnTexto(texto: string): boolean {
-  const botones = Array.from(document.querySelectorAll('button')) as HTMLButtonElement[];
-  const boton = botones.find((b) => b.textContent?.trim().startsWith(texto));
-  if (!boton) return false;
-  boton.click();
-  return true;
-}
-
-async function abrirMenuImportar() {
-  expect(clickEnTexto('Importar')).toBe(true);
-  await fixture.whenStable();
-}
-
-async function elegirVia(titulo: string) {
-  await abrirMenuImportar();
-  expect(clickEnTexto(titulo)).toBe(true);
-  await fixture.whenStable();
-}
-
-it('el menu muestra las dos vias en pantalla', async () => {
-  await abrirMenuImportar();
-
-  const opciones = fixture.nativeElement.querySelectorAll('.pi-file-pdf, .pi-table');
-  expect(opciones.length).toBe(2);
-  expect(fixture.nativeElement.textContent).toContain('Vía PDF');
-  expect(fixture.nativeElement.textContent).toContain('Vía Excel o CSV');
-});
-
-it('al elegir una via se ve el apartado de carga y no las tablas', async () => {
-  await elegirVia('Vía Excel o CSV');
-
-  const texto = fixture.nativeElement.textContent;
-  expect(texto).toContain('Subir extracto');
-  expect(texto).toContain('Arrastrá el archivo');
-
-  // La pantalla de conciliacion no esta montada mientras se importa: el
-  // apartado tiene que ser una pantalla aparte, no un cartel arriba.
-  expect(fixture.nativeElement.querySelector('table')).toBeNull();
-});
-
-it('la via PDF pide el banco y la via Excel no', async () => {
-  await elegirVia('Vía PDF');
-  expect(fixture.nativeElement.textContent).toContain('Banco del extracto');
-
-  await clickEnTexto('Volver');
-  await fixture.whenStable();
-
-  await elegirVia('Vía Excel o CSV');
-  expect(fixture.nativeElement.textContent).not.toContain('Banco del extracto');
-  expect(fixture.nativeElement.textContent).toContain('no hace falta elegir el banco');
-});
-
-it('el input de archivo solo acepta el formato de la via elegida', async () => {
-  await elegirVia('Vía PDF');
-  expect(fixture.nativeElement.querySelector('#subirArchivoExtracto').getAttribute('accept'))
-    .toBe('.pdf');
-
-  await clickEnTexto('Volver');
-  await fixture.whenStable();
-
-  await elegirVia('Vía Excel o CSV');
-  expect(fixture.nativeElement.querySelector('#subirArchivoExtracto').getAttribute('accept'))
-    .toBe('.xlsx,.xls,.csv');
-});
-
-it('el boton de leer arranca deshabilitado y se habilita al elegir archivo', async () => {
-  await elegirVia('Vía PDF');
-
-  const leer = () => {
-    const botones = fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>;
-    return Array.from(botones).find((b) => b.textContent?.trim() === 'Leer extracto')!;
-  };
-
-  expect(leer().disabled).toBe(true);
-
-  // Se dispara el change del input real, no se mueve el estado a mano: asi
-  // tambien se prueba que el input este bien enlazado al handler.
-  const input = fixture.nativeElement.querySelector('#subirArchivoExtracto');
-  Object.defineProperty(input, 'files', { value: [archivoConNombre('julio.pdf')] });
-  input.dispatchEvent(new Event('change'));
-  await fixture.whenStable();
-
-  expect(leer().disabled).toBe(false);
-  expect(fixture.nativeElement.textContent).toContain('julio.pdf');
-});
-
-it('volver deja la pantalla de conciliacion como estaba', async () => {
-  await elegirVia('Vía PDF');
-  await clickEnTexto('Volver');
-  await fixture.whenStable();
-
-  expect(fixture.nativeElement.textContent).not.toContain('Subir extracto');
-  expect(fixture.nativeElement.textContent).toContain('Movimientos bancarios');
-});
-
-// ------------------------------------------------------------------
-// Ir al backend
-// ------------------------------------------------------------------
-
-  it('manda el archivo al backend con el banco elegido', () => {
-    component.elegirModo('pdf');
-    component.bancoSeleccionado = 'ICBC';
-    component.archivoSeleccionado = archivoConNombre('julio.pdf');
-
-    component.procesarArchivo();
-    const req = http.expectOne('http://127.0.0.1:8000/api/extractos/procesar');
-
-    expect(req.request.body.get('banco')).toBe('ICBC');
-    expect(req.request.body.get('archivo') instanceof File).toBe(true);
-
-    req.flush({ exito: true, banco: 'ICBC', datos: [{ fecha: '2026-07-01', concepto: 'X', debe: 1, haber: 0, saldo: 1 }] });
-  });
-
-  it('la via Excel manda GENERICO como etiqueta y no exige banco', () => {
+    const req = http.expectOne(`${API}/extractos/procesar`);
     // Ahi las columnas se reconocen por el encabezado: el banco no cambia el
     // resultado, solo aparece en los logs del backend.
-    component.elegirModo('tabla');
-    component.bancoSeleccionado = '';
-    component.archivoSeleccionado = archivoConNombre('julio.xlsx');
-
-    component.procesarArchivo();
-    const req = http.expectOne('http://127.0.0.1:8000/api/extractos/procesar');
-
     expect(req.request.body.get('banco')).toBe('GENERICO');
-
+    expect(req.request.body.get('archivo') instanceof File).toBe(true);
     req.flush({ exito: true, banco: 'GENERICO', datos: [{ fecha: '2026-07-01', concepto: 'X', debe: 1, haber: 0, saldo: 1 }] });
-  });
 
-  it('la via PDF sin banco no manda nada y avisa', () => {
-    component.elegirModo('pdf');
-    component.bancoSeleccionado = '';
-    component.archivoSeleccionado = archivoConNombre('julio.pdf');
-
-    component.procesarArchivo();
-
-    http.expectNone('http://127.0.0.1:8000/api/extractos/procesar');
-    expect(component.errorMensaje).toContain('banco');
-  });
-
-  it('leer bien el archivo vuelve a la pantalla de conciliacion', () => {
-    component.elegirModo('tabla');
-    component.archivoSeleccionado = archivoConNombre('julio.xlsx');
-
-    component.procesarArchivo();
-    http.expectOne('http://127.0.0.1:8000/api/extractos/procesar').flush({
-      exito: true,
-      banco: 'GENERICO',
-      datos: [{ fecha: '2026-07-01', concepto: 'X', debe: 1, haber: 0, saldo: 1 }]
-    });
-
-    // No te deja atrapado en la pantalla de carga.
-    expect(component.enApartadoDeImportacion).toBe(false);
+    await fixture.whenStable();
     expect(component.movimientosBanco.length).toBe(1);
     expect(component.infoMensaje).toContain('1 movimientos');
   });
 
-  it('si el archivo no trae movimientos se queda en el apartado para corregirlo', () => {
-    component.elegirModo('tabla');
-    component.archivoSeleccionado = archivoConNombre('julio.xlsx');
+  it('un Excel con otra extension no sale al backend', async () => {
+    component.importarExcel(archivoConNombre('julio.pdf'));
 
-    component.procesarArchivo();
-    http.expectOne('http://127.0.0.1:8000/api/extractos/procesar').flush({
+    http.expectNone(`${API}/extractos/procesar`);
+    expect(component.errorMensaje).toContain('julio.pdf');
+    expect(component.movimientosBanco.length).toBe(0);
+  });
+
+  it('un Excel sin movimientos avisa y no deja la pantalla en cargado', async () => {
+    component.importarExcel(archivoConNombre('julio.csv'));
+    http.expectOne(`${API}/extractos/procesar`).flush({ exito: true, banco: 'GENERICO', datos: [] });
+
+    expect(component.cargando).toBe(false);
+    expect(component.errorMensaje).toContain('no tiene movimientos');
+    expect(component.infoMensaje).toBe('');
+  });
+
+  it('si el backend cae se muestra el motivo, no queda cargado para siempre', async () => {
+    component.importarExcel(archivoConNombre('julio.xlsx'));
+    http.expectOne(`${API}/extractos/procesar`).flush(
+      { detail: 'El archivo no tiene tablas legibles.' },
+      { status: 422, statusText: 'Unprocessable Entity' }
+    );
+
+    expect(component.cargando).toBe(false);
+    expect(component.errorMensaje).toContain('no tiene tablas legibles');
+    expect(component.movimientosBanco).toEqual([]);
+  });
+
+  it('leer un Excel nuevo borra el cruce anterior', async () => {
+    component.cruceRealizado = true;
+    component.conciliados = [
+      {
+        fecha: '2026-07-01',
+        concepto_banco: 'X',
+        concepto_xubio: 'Y',
+        debe: 1,
+        haber: 0,
+        saldo: 1,
+        importe: -1,
+        manual: true,
+      },
+    ];
+    component.ultimoPareoManual = { banco: {}, xubio: {} };
+
+    component.importarExcel(archivoConNombre('agosto.xlsx'));
+    http.expectOne(`${API}/extractos/procesar`).flush({
       exito: true,
       banco: 'GENERICO',
-      datos: []
+      datos: [{ fecha: '2026-08-01', concepto: 'Y', debe: 2, haber: 0, saldo: 2 }],
     });
 
-    // Acá sí conviene quedarse: el mensaje dice que hay que elegir otro archivo.
-    expect(component.enApartadoDeImportacion).toBe(true);
+    expect(component.cruceRealizado).toBe(false);
+    expect(component.conciliados).toEqual([]);
+    expect(component.ultimoPareoManual).toBeNull();
+  });
+
+  // ------------------------------------------------------------------
+  // Volver desde /procesando-pdf: los movimientos llegan por el servicio
+  // ------------------------------------------------------------------
+
+  it('al volver del flujo de PDF toma los movimientos del servicio', () => {
+    importacion.setMovimientos([
+      { fecha: '2026-07-01', concepto: 'COBRO', debe: 0, haber: 5, saldo: 5 },
+    ] as any);
+    const recienCreado = TestBed.createComponent(ConciliacionComponent);
+    recienCreado.componentInstance.ngOnInit();
+    http.expectOne(`${API}/extractos/bancos`).flush({ bancos: [], formatos: [] });
+
+    expect(recienCreado.componentInstance.movimientosBanco.length).toBe(1);
+    expect(recienCreado.componentInstance.infoMensaje).toContain('1 movimientos');
+  });
+
+  it('el servicio queda vacio despues de tomar los movimientos', () => {
+    importacion.setMovimientos([
+      { fecha: '2026-07-01', concepto: 'COBRO', debe: 0, haber: 5, saldo: 5 },
+    ] as any);
+    const recienCreado = TestBed.createComponent(ConciliacionComponent);
+    recienCreado.componentInstance.ngOnInit();
+    http.expectOne(`${API}/extractos/bancos`).flush({ bancos: [], formatos: [] });
+
+    // Si no se limpiera, al recargar '/' los movimientos aparecerian solos sin
+    // que nadie los hubiera importado en esta sesion.
+    expect(importacion.movimientos().length).toBe(0);
+  });
+
+  it('entrar a la conciliacion sin movimientos no inventa nada', () => {
+    expect(component.movimientosBanco).toEqual([]);
+    expect(component.infoMensaje).toBe('');
+  });
+
+  // ------------------------------------------------------------------
+  // Conciliacion manual: arrastrar una fila hasta su par
+  // ------------------------------------------------------------------
+
+  /** Dos pendientes, uno de cada lado, como los deja un cruce ya hecho. */
+  function conBandejasListas() {
+    component.cruceRealizado = true;
+    component.pendientesBanco = [
+      { fecha: '2026-07-01', concepto: 'COBRO CLIENTE A', importe: 1000, debe: 0, haber: 1000, saldo: 9000, categoria: 'operativo' },
+      { fecha: '2026-07-02', concepto: 'PAGO PROVEEDOR', importe: -250.5, debe: 250.5, haber: 0, saldo: 8749.5, categoria: 'operativo' },
+    ];
+    component.pendientesXubio = [
+      { fecha: '2026-07-01', concepto: 'FACT 0001 A', importe: 1000, debe: 1000, haber: 0 },
+      { fecha: '2026-07-05', concepto: 'OP RECIBIDA B', importe: 700, debe: 700, haber: 0 },
+    ];
+  }
+
+  const eventoFalso = () => ({
+    preventDefault: () => {},
+    stopPropagation: () => {},
+    dataTransfer: { setData: () => {}, effectAllowed: '', dropEffect: '' },
+  }) as any;
+
+  it('antes del cruce no se puede arrastrar', () => {
+    expect(component.puedeArrastrar).toBe(false);
+  });
+
+  it('despues del cruce y en la bandeja de pendientes si se puede arrastrar', () => {
+    conBandejasListas();
+
+    expect(component.puedeArrastrar).toBe(true);
+  });
+
+  it('en la pestana de conciliados no se arrastra', () => {
+    conBandejasListas();
+    component.cambiarTab('conciliados');
+
+    expect(component.puedeArrastrar).toBe(false);
+  });
+
+  it('soltar sobre una fila del otro lado arma el par y saca ambas de pendientes', () => {
+    conBandejasListas();
+    const banco = component.pendientesBanco[0];
+    const xubio = component.pendientesXubio[0];
+
+    component.alArrastrarFila(banco, 'banco', eventoFalso());
+    component.alSoltarSobreFila(xubio, 'xubio', eventoFalso());
+
+    expect(component.pendientesBanco).not.toContain(banco);
+    expect(component.pendientesXubio).not.toContain(xubio);
+    expect(component.conciliados.length).toBe(1);
+    expect(component.conciliados[0].manual).toBe(true);
+    expect(component.conciliados[0].concepto_banco).toBe('COBRO CLIENTE A');
+    expect(component.conciliados[0].concepto_xubio).toBe('FACT 0001 A');
+  });
+
+  it('el par manual que no cuadra queda anotado con la diferencia', () => {
+    conBandejasListas();
+
+    component.emparejar(component.pendientesBanco[0], component.pendientesXubio[1]);
+
+    // 1000 contra 700
+    expect(component.conciliados[0].diferencia).toBe(300);
+    expect(component.infoMensaje).toContain('300');
+  });
+
+  it('un par que cuadra al centimo no reporta diferencia', () => {
+    conBandejasListas();
+
+    component.emparejar(component.pendientesBanco[0], component.pendientesXubio[0]);
+
+    expect(component.conciliados[0].diferencia).toBe(0);
+  });
+
+  it('la diferencia de importe ignora el signo y compara los importes unificados', () => {
+    // El banco y el Xubio invierten debe/haber: el mismo hecho va con signo
+    // contrario en las dos columnas, pero el importe con signo ya viene
+    // unificado por el backend.
+    expect(component.diferenciaDeImporte({ importe: -250.5 }, { importe: -250.5 })).toBe(0);
+    expect(component.diferenciaDeImporte({ importe: 1000 }, { importe: 700 })).toBe(300);
+  });
+
+  it('no se puede soltar una fila del banco sobre otra del banco', () => {
+    conBandejasListas();
+    const origen = component.pendientesBanco[0];
+    const otraDelBanco = component.pendientesBanco[1];
+
+    component.alArrastrarFila(origen, 'banco', eventoFalso());
+    expect(component.puedeRecibir(otraDelBanco, 'banco')).toBe(false);
+
+    component.alSoltarSobreFila(otraDelBanco, 'banco', eventoFalso());
+
+    expect(component.conciliados.length).toBe(0);
+    expect(component.pendientesBanco.length).toBe(2);
+  });
+
+  it('el arrastre se puede hacer tambien desde la tabla de Xubio', () => {
+    conBandejasListas();
+
+    component.alArrastrarFila(component.pendientesXubio[0], 'xubio', eventoFalso());
+    component.alSoltarSobreFila(component.pendientesBanco[0], 'banco', eventoFalso());
+
+    expect(component.conciliados.length).toBe(1);
+    expect(component.pendientesXubio.length).toBe(1);
+    expect(component.pendientesBanco.length).toBe(1);
+  });
+
+  it('soltar limpia el arrastre, para que el renglon no quede pintado', () => {
+    conBandejasListas();
+
+    component.alArrastrarFila(component.pendientesBanco[0], 'banco', eventoFalso());
+    component.alArrastrarSobreFila(component.pendientesXubio[0], 'xubio', eventoFalso());
+    expect(component.filaDestino).not.toBeNull();
+
+    component.alSoltarSobreFila(component.pendientesXubio[0], 'xubio', eventoFalso());
+
+    expect(component.filaArrastrada).toBeNull();
+    expect(component.ladoArrastrado).toBeNull();
+    expect(component.filaDestino).toBeNull();
+  });
+
+  it('deshacer devuelve las dos filas a su bandeja', () => {
+    conBandejasListas();
+    const banco = component.pendientesBanco[0];
+    const xubio = component.pendientesXubio[0];
+    component.emparejar(banco, xubio);
+
+    component.deshacerPareoManual();
+
+    expect(component.conciliados.length).toBe(0);
+    expect(component.pendientesBanco).toContain(banco);
+    expect(component.pendientesXubio).toContain(xubio);
+    expect(component.ultimoPareoManual).toBeNull();
+  });
+
+  it('deshacer sin paresPrevios no rompe', () => {
+    conBandejasListas();
+
+    expect(() => component.deshacerPareoManual()).not.toThrow();
+    expect(component.pendientesBanco.length).toBe(2);
+  });
+
+  it('no se puede armar un par con una fila que ya no esta pendiente', () => {
+    conBandejasListas();
+    const banco = component.pendientesBanco[0];
+    const xubio = component.pendientesXubio[0];
+    component.emparejar(banco, xubio);
+
+    // La segunda vez la fila del banco ya salio de pendientes.
+    component.emparejar(banco, component.pendientesXubio[0]);
+
+    expect(component.conciliados.length).toBe(1);
     expect(component.errorMensaje).not.toBe('');
+  });
+
+  it('un cruce nuevo borra los pares manuales del cruce anterior', () => {
+    conBandejasListas();
+    component.emparejar(component.pendientesBanco[0], component.pendientesXubio[0]);
+    expect(component.ultimoPareoManual).not.toBeNull();
+
+    component.movimientosBanco = [{ fecha: '2026-07-01', concepto: 'X', debe: 1, haber: 0, saldo: 1 }];
+    component.ejecutarAutoconciliacion();
+    http.expectOne(`${API}/xubio/cruzar-datos`).flush({
+      exito: true,
+      tablas: { conciliados: [], pendientes_banco: [], pendientes_xubio: [] },
+    });
+
+    expect(component.ultimoPareoManual).toBeNull();
+  });
+
+  it('los pares del backend cuentan como automaticos, no como manuales', () => {
+    component.movimientosBanco = [{ fecha: '2026-07-01', concepto: 'X', debe: 1, haber: 0, saldo: 1 }];
+    component.ejecutarAutoconciliacion();
+    http.expectOne(`${API}/xubio/cruzar-datos`).flush({
+      exito: true,
+      tablas: {
+        conciliados: [{ fecha: '2026-07-01', concepto_banco: 'A', concepto_xubio: 'B', cuadra: true }],
+        pendientes_banco: [],
+        pendientes_xubio: [],
+      },
+    });
+
+    expect(component.paresManuales.length).toBe(0);
+    expect(component.paresAutomaticos.length).toBe(1);
+  });
+
+  // ------------------------------------------------------------------
+  // Que se vea de verdad
+  //
+  // Los tests de arriba mueven el estado del componente a mano, asi que no
+  // renderizan. Con el builder zoneless de Angular 22, mutar una propiedad y
+  // llamar a detectChanges() no repinta: hace falta un evento real del DOM, que si
+  // es un origen de notificacion. Por eso estos tests clickean la pantalla como
+  // lo haria el usuario. Tambien es lo que atrapa un error de template (un
+  // ng-container sin cerrar, un *ngIf al reves) que si no revienta recien al
+  // abrir la aplicacion.
+  // ------------------------------------------------------------------
+
+  /** Click en el boton cuyo texto empiece con el texto buscado. */
+  function clickEnTexto(texto: string): boolean {
+    const botones = Array.from(document.querySelectorAll('button')) as HTMLButtonElement[];
+    const boton = botones.find((b) => b.textContent?.trim().startsWith(texto));
+    if (!boton) return false;
+    boton.click();
+    return true;
+  }
+
+  async function abrirMenuImportar() {
+    expect(clickEnTexto('Importar')).toBe(true);
+    await fixture.whenStable();
+  }
+
+  // ------------------------------------------------------------------
+  // Exportar: el papel de trabajo FO 02-03
+  // ------------------------------------------------------------------
+
+  const URL_EXPORTAR = `${API}/exportar/conciliacion`;
+
+  /** jsdom no implementa createObjectURL, que es lo que usa la descarga. */
+  function conDescargaEspiada() {
+    const original = URL.createObjectURL;
+    const revocarOriginal = URL.revokeObjectURL;
+    const clickOriginal = HTMLAnchorElement.prototype.click;
+    URL.createObjectURL = () => 'blob:mock';
+    URL.revokeObjectURL = () => {};
+    HTMLAnchorElement.prototype.click = () => {};
+
+    return () => {
+      URL.createObjectURL = original;
+      URL.revokeObjectURL = revocarOriginal;
+      HTMLAnchorElement.prototype.click = clickOriginal;
+    };
+  }
+
+  it('antes del cruce no hay nada que exportar y el boton queda apagado', () => {
+    component.movimientosBanco = [{ fecha: '2026-07-01', concepto: 'X', debe: 1, haber: 0, saldo: 1 }];
+
+    // El extracto del banco sin cruzar no es una conciliacion: bajarlo seria
+    // entregar un papel de trabajo con cero partidas conciliadas.
+    expect(component.puedeExportar).toBe(false);
+    expect(component.motivoExportBloqueado).toContain('no hay');
+  });
+
+  it('con las bandejas llenas el boton se puede usar', () => {
+    conBandejasListas();
+
+    expect(component.puedeExportar).toBe(true);
+    expect(component.motivoExportBloqueado).toBe('');
+  });
+
+  it('sin nada que exportar avisa y no sale al backend', () => {
+    component.exportarPapelDeTrabajo();
+
+    http.expectNone(URL_EXPORTAR);
+    expect(component.errorMensaje).toContain('conciliación');
+  });
+
+  it('el payload manda las tres bandejas y el membrete', () => {
+    conBandejasListas();
+    component.bancoSeleccionado = 'SANT';
+    component.fechaDesde = '2026-07-01';
+    component.fechaHasta = '2026-07-31';
+
+    const payload = component.payloadDeExportacion();
+
+    expect(payload.conciliados).toEqual([]);
+    expect(payload.pendientes_banco.length).toBe(2);
+    expect(payload.pendientes_xubio.length).toBe(2);
+    expect(payload.encabezado.banco).toBe('SANT');
+  });
+
+  // El papel de trabajo tiene que mostrar lo que el usuario acaba de revisar.
+  // Un par armado a mano no lo conoce el backend, asi que si el payload no lo
+  // incluye, el archivo sale con la conciliacion a medias.
+  it('el payload incluye los pares armados a mano con su diferencia', () => {
+    conBandejasListas();
+    component.emparejar(component.pendientesBanco[0], component.pendientesXubio[1]);
+
+    const payload = component.payloadDeExportacion();
+
+    expect(payload.conciliados.length).toBe(1);
+    expect(payload.conciliados[0].manual).toBe(true);
+    expect(payload.conciliados[0].diferencia).toBe(300);
+    expect(payload.pendientes_banco.length).toBe(1);
+    expect(payload.pendientes_xubio.length).toBe(1);
+  });
+
+  it('el periodo sale del rango de fechas de los filtros', () => {
+    conBandejasListas();
+    component.fechaDesde = '2026-07-01';
+    component.fechaHasta = '2026-07-31';
+
+    // La celda del periodo en la plantilla tiene formato 'mmmm yyyy': por eso
+    // va solo el anio y el mes, no la fecha entera.
+    expect(component.encabezadoDelPapel().periodo).toBe('2026-07');
+  });
+
+  it('sin rango de fechas el periodo queda en null, no inventado', () => {
+    conBandejasListas();
+
+    expect(component.encabezadoDelPapel().periodo).toBeNull();
+  });
+
+  it('la empresa queda vacia hasta que haya un dato real', () => {
+    conBandejasListas();
+
+    // No hay endpoint de empresa y no hay dato hardcodeado en el proyecto.
+    // Poner un nombre inventado en un papel de trabajo firmado es peor que
+    // dejarlo en blanco.
+    expect(component.encabezadoDelPapel().empresa).toBe('');
+  });
+
+  it('exportar baja el archivo y avisa con el conteo', async () => {
+    const restaurar = conDescargaEspiada();
+    conBandejasListas();
+
+    try {
+      component.exportarPapelDeTrabajo();
+      const peticion = http.expectOne(URL_EXPORTAR);
+      expect(peticion.request.method).toBe('POST');
+      peticion.flush(new Blob(['xlsx']), {
+        headers: { 'Content-Disposition': 'attachment; filename="FO 02-03 algo.xlsx"' },
+      });
+      await fixture.whenStable();
+
+      expect(component.exportando).toBe(false);
+      expect(component.infoMensaje).toContain('0 conciliados');
+      expect(component.errorMensaje).toBe('');
+    } finally {
+      restaurar();
+    }
+  });
+
+  it('mientras arma el archivo el boton queda deshabilitado y no se repregunta', () => {
+    conBandejasListas();
+
+    component.exportarPapelDeTrabajo();
+    http.expectOne(URL_EXPORTAR);
+
+    expect(component.exportando).toBe(true);
+    expect(component.puedeExportar).toBe(false);
+
+    // Tres clicks seguidos tienen que ser un solo archivo, no tres.
+    component.exportarPapelDeTrabajo();
+    component.exportarPapelDeTrabajo();
+    http.expectNone(URL_EXPORTAR);
+  });
+
+  // Con responseType 'blob', el body del error llega como Blob: el motivo real
+  // esta adentro y hay que abrirlo. Si no se abre, el usuario lee "no se pudo
+  // generar el Excel" en lugar de "no hay nada conciliado para exportar".
+  it('si el backend falla se muestra el motivo real y se vuelve a habilitar', async () => {
+    conBandejasListas();
+
+    component.exportarPapelDeTrabajo();
+    http.expectOne(URL_EXPORTAR).flush(
+      new Blob([JSON.stringify({ detail: 'No hay nada conciliado para exportar.' })]),
+      { status: 400, statusText: 'Bad Request' },
+    );
+    await fixture.whenStable();
+    // El mensaje se resuelve en una promesa y leer un Blob pasa por
+    // text(), asi que hacen falta dos turnos de macrotarea antes de que
+    // aparezca en pantalla.
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+    await fixture.whenStable();
+
+    expect(component.exportando).toBe(false);
+    expect(component.errorMensaje).toBe('No hay nada conciliado para exportar.');
+  });
+
+  it('si el backend no esta, el error no deja el boton trabado', async () => {
+    conBandejasListas();
+
+    component.exportarPapelDeTrabajo();
+    http.expectOne(URL_EXPORTAR).error(new ProgressEvent('error'), { status: 0 });
+    await fixture.whenStable();
+
+    expect(component.exportando).toBe(false);
+    expect(component.puedeExportar).toBe(true);
+  });
+
+  it('el motivo del boton apagado se escribe en pantalla, no solo en el title', async () => {
+    component.movimientosBanco = [{ fecha: '2026-07-01', concepto: 'X', debe: 1, haber: 0, saldo: 1 }];
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    // Un boton deshabilitado sin explicacion deja al usuario buscando que le
+    // falta. Ademas el title no se ve en un celular.
+    expect(fixture.nativeElement.textContent).toContain('Todavía no hay una conciliación');
   });
 });

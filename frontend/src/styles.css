@@ -109,6 +109,27 @@
   .tarjeta-cambio {
     animation: tarjeta-cambio 0.5s ease-out;
   }
+
+  /* Barra de desplazamiento fina para las tablas anchas: en Windows el riel
+     nativo mide ~17px y come ancho de columnas. */
+  .scroll-fino {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 transparent;
+  }
+  .scroll-fino::-webkit-scrollbar {
+    height: 8px;
+    width: 8px;
+  }
+  .scroll-fino::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scroll-fino::-webkit-scrollbar-thumb {
+    background-color: #cbd5e1;
+    border-radius: 9999px;
+  }
+  .scroll-fino::-webkit-scrollbar-thumb:hover {
+    background-color: #94a3b8;
+  }
 }
 
 /* Respetamos a quien pidió menos movimiento en el sistema. */

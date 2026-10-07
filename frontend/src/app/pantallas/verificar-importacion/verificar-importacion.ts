@@ -182,6 +182,19 @@ export class VerificarImportacionComponent {
   }
 
   /**
+   * La fecha se muestra como se lee acá (dd/mm/aaaa), no como la entrega el
+   * extractor (AAAA-MM-DD). Se arma con las partes del string y no con Date a
+   * proposito: parsear "2026-09-01" como UTC y mostrarlo en hora argentina
+   * retrocede un dia.
+   */
+  fechaLegible(fecha: string | null | undefined): string {
+    if (!fecha) return '—';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return fecha;
+    const [anio, mes, dia] = fecha.split('-');
+    return `${dia}/${mes}/${anio}`;
+  }
+
+  /**
    * Lo que se ve mientras se edita un importe: el numero plano, sin separador
    * de miles. Editar "1.234,56" es mas comodo que editar "1234,56" y el input
    * type text con inputMode numeric acepta punto y coma.

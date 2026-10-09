@@ -104,6 +104,10 @@ def conciliar_movimientos(
             "origen": "xubio",
             "fecha": _a_fecha(m.get("fecha")),
             "concepto": str(m.get("concepto") or "").strip(),
+            # El numero de comprobante del mayor no participa del cruce (se
+            # compara importe y fecha), pero no se puede tirar: la bandeja
+            # derecha lo muestra al lado de la fecha y el detalle.
+            "comprobante": str(m.get("comprobante") or "").strip() or None,
             "debe": float(_dec(m.get("debe"))),
             "haber": float(_dec(m.get("haber"))),
             "importe": float(_importe_xubio(m)),
@@ -171,6 +175,11 @@ def conciliar_movimientos(
                 "fecha": mov_b["fecha"].isoformat() if mov_b["fecha"] else None,
                 "concepto_banco": mov_b["concepto"],
                 "concepto_xubio": mov_x["concepto"],
+                # El comprobante y el importe unificado del lado de Xubio: el par
+                # guarda los del banco, y la bandeja derecha muestra los del
+                # mayor (importe = debe - haber, al reves que el banco).
+                "comprobante_xubio": mov_x.get("comprobante"),
+                "importe_xubio": mov_x["importe"],
                 "debe": mov_b["debe"],
                 "haber": mov_b["haber"],
                 "saldo": mov_b["saldo"],

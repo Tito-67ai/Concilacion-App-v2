@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Any, Optional
 from datetime import date, datetime
 
@@ -69,6 +69,10 @@ class MovimientoMayor(BaseModel):
 
     fecha: Optional[date] = None
     concepto: str = ""
+    # El numero de comprobante (FCA-0001-00000001, etc.) cuando el export del
+    # contable trae la columna (COMPROBANTE/NROCOMPROBANTE). La bandeja derecha
+    # lo muestra junto a la fecha y el detalle: sin el, la fila se ve con '—'.
+    comprobante: Optional[str] = None
     debe: float = 0.0
     haber: float = 0.0
 
@@ -165,3 +169,115 @@ class SolicitudExportacion(BaseModel):
     pendientes_banco: list[PendienteExport] = Field(default_factory=list)
     pendientes_xubio: list[PendienteExport] = Field(default_factory=list)
     encabezado: EncabezadoConciliacion = Field(default_factory=EncabezadoConciliacion)
+
+
+# ----------------------------------------------------------------------
+# Afiliados (clientes) desde la web de Xubio
+# ----------------------------------------------------------------------
+#
+# La API oficial de Xubio esta reservada a planes superiores al contratado,
+# asi que la lista de afiliados se lee de la API interna del frontend web
+# (core.xubio.com/ar/sba/api/cliente/clientes/findAllPaginado) usando la cookie
+# de sesion del navegador (xubio_web_client.py). Los nombres de campo imitan
+# los que manda Xubio a proposito: inventar un mapeo propio entre nombres solo
+# daria otra superficie donde romperse cuando Xubio cambie algo.
+
+
+class Afiliado(BaseModel):
+    """Un cliente/afiliado tal como lo devuelve clientes/findAllPaginado."""
+
+    # La web manda decenas de campos; la app se queda con los que usa y
+    # descarta el resto sin quejarse.
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    organizacionId: int
+    organizacionNombre: str
+    cuit: Optional[str] = None
+    categoriaFiscal: Optional[str] = None
+    activo: int = 1
+    esProveedor: int = 0
+    email: Optional[str] = None
+    # La web manda telefono nulo en varios registros, no solo en los que no
+    # tiene dato: el campo tiene que aceptar None y no solo "".
+    telefono: Optional[str] = None
+    localidad: Optional[str] = None
+    provincia: Optional[str] = None
+    pais: Optional[str] = None
+    cuentaVenta: Optional[str] = None
+
+
+class RespuestaAfiliados(BaseModel):
+    exito: bool
+    cantidad: int
+    # La lista completa ya paginada: el backend llama a todas las paginas que
+    # haga falta y aca llega entera.
+    datos: list[Afiliado]
+
+
+class SolicitudCruceAfiliados(BaseModel):
+    movimientos: list[MovimientoBancario]
+    # Si el frontend ya tiene la lista descargada la manda aca y el backend no
+    # vuelve a llamar a la web de Xubio.
+    afiliados: list[Afiliado] = Field(default_factory=list)
+
+
+class MovimientoMayorClasificable(BaseModel):
+    """Una fila del lado de Xubio, para clasificarla contra los afiliados.
+
+    El cruce devuelve los pendientes del mayor como {fecha, concepto, debe,
+    haber, importe} y los pares con mas campos (concepto_banco, saldo, etc.).
+    Este schema acepta cualquiera de las dos formas: lo que no se reconoce se
+    descarta, porque lo unico que se lee es el texto de la fila.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    fecha: Optional[date] = None
+    concepto: str = ""
+    debe: float = 0.0
+    haber: float = 0.0
+    importe: Optional[float] = None
+
+    _fecha = field_validator("fecha", mode="before")(_normalizar_fecha)
+
+
+class SolicitudClasificarMayor(BaseModel):
+    """Clasifica los movimientos del Libro Mayor por afiliado, sin cruzar nada.
+
+    Alimenta el filtro "Empresa" de la bandeja derecha: el mismo cruce puro de
+    /cruzar-afiliados, pero para las filas del mayor en vez de las del banco.
+    """
+
+    movimientos: list[MovimientoMayorClasificable]
+    # Igual que en SolicitudCruceAfiliados: si el frontend ya bajo la lista la
+    # manda aca y el backend no vuelve a la web de Xubio.
+    afiliados: list[Afiliado] = Field(default_factory=list)
+
+
+class CruceAfiliadoMovimiento(BaseModel):
+    indice: int
+    afiliado: Optional[Afiliado] = None
+    # 'cuit' o 'nombre'; None cuando la fila no encontro a nadie.
+    metodo: Optional[str] = None
+
+
+class RespuestaCruceAfiliados(BaseModel):
+    exito: bool
+    resumen: dict
+    # Una entrada por movimiento, en el mismo orden: datos[i] corresponde a
+    # movimientos[i], asi el frontend puede superponerla a su tabla sin
+    # buscar.
+    datos: list[CruceAfiliadoMovimiento]
+
+
+class SolicitudLoginXubio(BaseModel):
+    """Credenciales del login de la pantalla de conciliacion.
+
+    El backend las guarda en backend/.env (XUBIO_EMAIL / XUBIO_PASSWORD) y las
+    usa el bot para renovar la sesion de la web de Xubio con el navegador
+    visible. No se versionan: quedan solo en el .env local.
+    """
+
+    email: str
+    password: str

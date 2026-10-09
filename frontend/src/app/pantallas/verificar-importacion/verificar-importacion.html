@@ -1,4 +1,4 @@
-﻿<div class="min-h-screen bg-[#f9fafb] p-6">
+<div class="min-h-screen bg-[#f9fafb] p-6">
   <div class="mx-auto max-w-6xl animate-aparecer-sube">
 
     <!-- 1. Encabezado -------------------------------------------------------
@@ -36,10 +36,24 @@
 
     <!-- 2. Tarjetas de resumen (KPIs) --------------------------------------
          Icono chico y etiqueta arriba, el numero grande y de color abajo: lo que
-         se mira primero es el importe, no el rotulo. Los tres numeros salen de
-         los movimientos de la tabla, asi que cambian mientras se edita. -->
-    <section class="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+         se mira primero es el importe, no el rotulo. Los numeros salen de los
+         movimientos de la tabla, asi que cambian mientras se edita. Los dos
+         saldos tambien: el inicial se deduce de la primera fila (la del
+         "SALDO ANTERIOR" del PDF) y el final es el de la ultima, y ambos cierran
+         con creditos y debitos: final = inicial + creditos - debitos. -->
+    <section class="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
       <div class="animate-aparecer-sube rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
+        <div class="flex items-center gap-2">
+          <i class="pi pi-history text-[11px] text-gray-400" aria-hidden="true"></i>
+          <p class="text-xs text-gray-500">Saldo inicial</p>
+        </div>
+        <p class="mt-2 tabular-nums text-xl font-semibold text-gray-900">{{ formatear(saldoInicial()) }}</p>
+      </div>
+
+      <div
+        class="animate-aparecer-sube rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-sm"
+        style="animation-delay: 60ms"
+      >
         <div class="flex items-center gap-2">
           <i class="pi pi-arrow-up text-[11px] text-[#16a34a]" aria-hidden="true"></i>
           <p class="text-xs text-gray-500">Total créditos</p>
@@ -49,7 +63,7 @@
 
       <div
         class="animate-aparecer-sube rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-sm"
-        style="animation-delay: 60ms"
+        style="animation-delay: 120ms"
       >
         <div class="flex items-center gap-2">
           <i class="pi pi-arrow-down text-[11px] text-[#dc2626]" aria-hidden="true"></i>
@@ -60,7 +74,7 @@
 
       <div
         class="animate-aparecer-sube rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-sm"
-        style="animation-delay: 120ms"
+        style="animation-delay: 180ms"
       >
         <div class="flex items-center gap-2">
           <i class="pi pi-arrow-left-arrow-right text-[11px] text-gray-400" aria-hidden="true"></i>
@@ -68,6 +82,56 @@
         </div>
         <p class="mt-2 tabular-nums text-xl font-semibold text-gray-900">{{ formatear(diferencia()) }}</p>
       </div>
+
+      <div
+        class="animate-aparecer-sube rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-sm"
+        style="animation-delay: 240ms"
+      >
+        <div class="flex items-center gap-2">
+          <i class="pi pi-bullseye text-[11px] text-gray-400" aria-hidden="true"></i>
+          <p class="text-xs text-gray-500">Saldo final</p>
+        </div>
+        <p class="mt-2 tabular-nums text-xl font-semibold text-gray-900">{{ formatear(saldoFinal()) }}</p>
+      </div>
+    </section>
+
+    <!-- 2.5 Busqueda ------------------------------------------------------
+         Barra para encontrar un movimiento dentro del extracto sin perder el
+         contexto de la tabla. Filtra por fecha, concepto o referencia; no
+         borra nada y no cambia los totales. -->
+    <section class="mb-4 max-w-md">
+      <div class="relative">
+        <i class="pi pi-search pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-gray-400" aria-hidden="true"></i>
+        <input
+          type="text"
+          (input)="busqueda.set($any($event.target).value)"
+          [value]="busqueda()"
+          placeholder="Buscar por fecha, concepto o referencia"
+          aria-label="Buscar movimientos"
+          class="w-full rounded-xl border border-gray-200 bg-white py-2.5 pl-9 pr-9 text-sm text-gray-700 shadow-sm outline-none transition-colors duration-200 placeholder:text-gray-400 focus:border-[#004e82]"
+        />
+        <button
+          *ngIf="busqueda()"
+          type="button"
+          (click)="busqueda.set('')"
+          aria-label="Limpiar búsqueda"
+          class="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-full p-1 text-gray-400 transition-colors duration-200 hover:bg-gray-100 hover:text-gray-600"
+        >
+          <i class="pi pi-times text-[10px]"></i>
+        </button>
+      </div>
+      <p *ngIf="busqueda() || hayFiltros()" class="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-gray-400">
+        <span>{{ filasVisibles().length }} de {{ movimientos().length }} movimientos coinciden.</span>
+        <button
+          *ngIf="hayFiltros()"
+          type="button"
+          (click)="limpiarFiltros()"
+          class="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[11px] text-gray-500 transition-colors duration-150 hover:border-[#004e82]/40 hover:text-[#004e82]"
+        >
+          <i class="pi pi-filter-slash text-[9px]"></i>
+          Quitar filtros ({{ cantidadFiltros() }})
+        </button>
+      </p>
     </section>
 
     <!-- 3. Tabla ------------------------------------------------------------
@@ -77,17 +141,20 @@
          todos juntos para arriba. -->
     <section class="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
 
-      <!-- Capa invisible que cierra los menus al clickear afuera -->
-      <div *ngIf="menuAbierto() || menuColumnasAbierto()" (click)="menuAbierto.set(null); menuColumnasAbierto.set(false)"
-           class="fixed inset-0 z-30"></div>
+      <!-- Capa invisible que cierra el panel del embudo al clickear afuera -->
+      <div
+        *ngIf="filtroAbierto()"
+        (click)="filtroAbierto.set(null)"
+        class="fixed inset-0 z-30"
+      ></div>
 
       <div class="scroll-fino max-h-[65vh] overflow-auto">
         <table class="w-full border-collapse text-left text-sm">
           <thead>
             <tr class="border-b border-gray-200">
               <th
-                *ngFor="let columna of columnasVisibles()"
-                class="sticky top-0 z-10 bg-[#fafbfc] px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-gray-500 shadow-[inset_0_-1px_0_#e5e7eb]"
+                *ngFor="let columna of columnas"
+                class="sticky top-0 z-40 bg-[#fafbfc] px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-gray-500 shadow-[inset_0_-1px_0_#e5e7eb]"
               >
                 <div class="flex items-center gap-1.5">
                   <button
@@ -104,91 +171,111 @@
                     ></i>
                   </button>
 
-                  <!-- Tres puntitos finos entre encabezados: la sensacion de que
-                       la columna se puede ajustar. -->
+                  <!-- Embudo estilo Excel: ordenar de menor a mayor o al reves y
+                       marcar los valores que se quieren ver. Se pinta lleno y en
+                       azul cuando la columna esta filtrando. -->
                   <button
                     type="button"
-                    (click)="alternarMenu(columna.clave, $event)"
-                    class="ml-auto rounded p-1 text-gray-300 transition-colors duration-200 hover:bg-gray-100 hover:text-gray-500"
-                    [attr.aria-label]="'Opciones de la columna ' + columna.titulo"
-                  >
-                    <i class="pi pi-ellipsis-v text-[10px]"></i>
-                  </button>
-                </div>
-
-                <div
-                  *ngIf="menuAbierto() === columna.clave"
-                  (click)="$event.stopPropagation()"
-                  class="animate-aparecer-pop absolute left-0 top-full z-40 mt-1 w-48 rounded-lg border border-gray-200 bg-white p-1 shadow-lg"
-                >
-                  <button
-                    type="button"
-                    (click)="ordenarPor(columna.clave)"
-                    class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-gray-600 transition-colors duration-150 hover:bg-[#f4f6f8]"
-                  >
-                    <i class="pi pi-sort-alpha-down text-[10px] text-gray-400"></i>
-                    Ordenar de menor a mayor
-                  </button>
-                  <button
-                    type="button"
-                    (click)="ordenarPor(columna.clave)"
-                    class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-gray-600 transition-colors duration-150 hover:bg-[#f4f6f8]"
-                  >
-                    <i class="pi pi-sort-alpha-up text-[10px] text-gray-400"></i>
-                    Ordenar de mayor a menor
-                  </button>
-                  <div class="my-1 h-px bg-gray-100"></div>
-                  <button
-                    type="button"
-                    (click)="ocultarColumna(columna.clave)"
-                    class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-gray-600 transition-colors duration-150 hover:bg-[#f4f6f8]"
-                  >
-                    <i class="pi pi-eye-slash text-[10px] text-gray-400"></i>
-                    Ocultar columna
-                  </button>
-                </div>
-              </th>
-
-              <!-- Ultima celda del encabezado: las columnas que el usuario
-                   escondio. Sin esto, esconder una columna con los tres
-                   puntitos seria una puerta sin salida. -->
-              <th class="sticky top-0 z-10 w-12 bg-[#fafbfc] px-2 py-3 text-right shadow-[inset_0_-1px_0_#e5e7eb]">
-                <span class="sr-only">Columnas visibles</span>
-                <button
-                  type="button"
-                  (click)="alternarMenuColumnas($event)"
-                  class="rounded p-1 text-gray-300 transition-colors duration-200 hover:bg-gray-100 hover:text-gray-500"
-                  aria-label="Elegir columnas visibles"
-                >
-                  <i class="pi pi-table text-[10px]"></i>
-                </button>
-
-                <div
-                  *ngIf="menuColumnasAbierto()"
-                  (click)="$event.stopPropagation()"
-                  class="animate-aparecer-pop absolute right-0 top-full z-40 mt-1 w-44 rounded-lg border border-gray-200 bg-white p-1 shadow-lg"
-                >
-                  <button
-                    *ngFor="let columna of columnas"
-                    type="button"
-                    (click)="mostrarColumna(columna.clave)"
-                    class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-gray-600 transition-colors duration-150 hover:bg-[#f4f6f8]"
+                    (click)="abrirFiltro(columna.clave, $event)"
+                    class="ml-auto rounded p-1 transition-colors duration-200 hover:bg-gray-100"
+                    [attr.aria-label]="'Filtrar por ' + columna.titulo"
+                    [title]="tieneFiltro(columna.clave) ? 'Hay un filtro en ' + columna.titulo : 'Filtrar por ' + columna.titulo"
+                    [ngClass]="tieneFiltro(columna.clave) ? 'bg-[#eaf2f7] text-[#004e82]' : 'text-gray-300 hover:text-gray-500'"
                   >
                     <i
-                      class="text-[10px]"
-                      [ngClass]="estaOculta(columna.clave) ? 'pi pi-minus text-gray-300' : 'pi pi-check text-[#004e82]'"
+                      class="pi text-[10px]"
+                      [ngClass]="tieneFiltro(columna.clave) ? 'pi-filter-fill' : 'pi-filter'"
                     ></i>
-                    {{ columna.titulo }}
+                  </button>
+                </div>
+
+                <!-- Panel del embudo: el filtro de Excel. Arriba el orden
+                     (A→Z o Z→A), abajo la lista de valores unicos con su
+                     checkbox. Se alinea a la derecha para que la columna
+                     debito, pegada al borde, no se corte contra el scroll. -->
+                <div
+                  *ngIf="filtroAbierto() === columna.clave"
+                  (click)="$event.stopPropagation()"
+                  class="animate-aparecer-pop absolute top-full z-40 mt-1 w-64 rounded-lg border border-gray-200 bg-white p-1 shadow-lg"
+                  [ngClass]="alinearPanelDerecha(columna.clave) ? 'right-0' : 'left-0'"
+                >
+                  <div class="flex items-center gap-1 p-1">
+                    <button
+                      type="button"
+                      (click)="ordenarAscendente(columna.clave)"
+                      class="flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs transition-colors duration-150"
+                      [ngClass]="sentidoOrden(columna.clave) === 'asc' ? 'bg-[#eaf2f7] text-[#004e82]' : 'text-gray-600 hover:bg-[#f4f6f8]'"
+                      [title]="esTexto(columna.clave) ? 'Ordenar de menor a mayor (A a Z)' : 'Ordenar de menor a mayor'"
+                    >
+                      <i
+                        class="pi text-[10px]"
+                        [ngClass]="esTexto(columna.clave) ? 'pi-sort-alpha-down' : 'pi-sort-amount-down'"
+                      ></i>
+                      {{ esTexto(columna.clave) ? 'A→Z' : 'Menor a mayor' }}
+                    </button>
+                    <button
+                      type="button"
+                      (click)="ordenarDescendente(columna.clave)"
+                      class="flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs transition-colors duration-150"
+                      [ngClass]="sentidoOrden(columna.clave) === 'desc' ? 'bg-[#eaf2f7] text-[#004e82]' : 'text-gray-600 hover:bg-[#f4f6f8]'"
+                      [title]="esTexto(columna.clave) ? 'Ordenar de mayor a menor (Z a A)' : 'Ordenar de mayor a menor'"
+                    >
+                      <i
+                        class="pi text-[10px]"
+                        [ngClass]="esTexto(columna.clave) ? 'pi-sort-alpha-up' : 'pi-sort-amount-up'"
+                      ></i>
+                      {{ esTexto(columna.clave) ? 'Z→A' : 'Mayor a menor' }}
+                    </button>
+                  </div>
+                  <div class="my-1 h-px bg-gray-100"></div>
+
+                  <label
+                    class="flex cursor-pointer items-center gap-2 rounded-md px-3 py-1.5 transition-colors duration-150 hover:bg-[#f4f6f8]"
+                  >
+                    <input
+                      type="checkbox"
+                      class="shrink-0 [accent-color:#004e82]"
+                      [checked]="todosSeleccionados(columna.clave)"
+                      (change)="alternarTodos(columna.clave)"
+                    />
+                    <span class="text-xs text-gray-600">Seleccionar todo</span>
+                  </label>
+
+                  <div class="scroll-fino mt-1 max-h-40 overflow-y-auto">
+                    <label
+                      *ngFor="let valor of valoresUnicos(columna.clave)"
+                      class="flex cursor-pointer items-center gap-2 rounded-md px-3 py-1.5 transition-colors duration-150 hover:bg-[#f4f6f8]"
+                    >
+                      <input
+                        type="checkbox"
+                        class="shrink-0 [accent-color:#004e82]"
+                        [checked]="valorSeleccionado(columna.clave, valor)"
+                        (change)="alternarValor(columna.clave, valor)"
+                      />
+                      <span class="truncate text-xs text-gray-700">{{ etiquetaValor(columna.clave, valor) }}</span>
+                    </label>
+                  </div>
+
+                  <div class="my-1 h-px bg-gray-100"></div>
+                  <button
+                    *ngIf="tieneFiltro(columna.clave)"
+                    type="button"
+                    (click)="limpiarFiltro(columna.clave)"
+                    class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-gray-600 transition-colors duration-150 hover:bg-[#f4f6f8]"
+                  >
+                    <i class="pi pi-filter-slash text-[10px] text-gray-400"></i>
+                    Limpiar filtro de la columna
                   </button>
                 </div>
               </th>
+
             </tr>
           </thead>
 
           <tbody>
             <!-- Estado vacio: una fila alta con el motivo, no una tabla pelada -->
             <tr *ngIf="movimientos().length === 0">
-              <td [attr.colspan]="columnasVisibles().length + 1" class="px-4 py-16 text-center">
+              <td [attr.colspan]="columnas.length + 1" class="px-4 py-16 text-center">
                 <i class="pi pi-inbox text-3xl text-gray-300"></i>
                 <p class="mt-3 text-sm text-gray-500">No hay registros para mostrar.</p>
                 <p class="mt-1 text-xs text-gray-400">
@@ -203,7 +290,7 @@
                 [class.bg-red-50]="errores().has(mov.id)"
               >
                 <!-- Fecha -->
-                <td *ngIf="visible('fecha')" class="px-4 py-2">
+                <td class="px-4 py-2">
                   <input
                     #celdaEnEdicion
                     *ngIf="borrador()?.id === mov.id && borrador()?.campo === 'fecha'; else fechaTexto"
@@ -222,13 +309,17 @@
                       (click)="editar(mov, 'fecha', mov.fecha)"
                       class="tabular-nums w-full rounded px-2 py-1 text-left transition-colors duration-150 hover:bg-gray-50"
                     >
-                      {{ fechaLegible(mov.fecha) }}
+                      <ng-container *ngFor="let parte of partesResaltadas(fechaLegible(mov.fecha))">
+                        <mark *ngIf="parte.esCoincidencia"
+                              class="rounded bg-yellow-200 px-0.5 text-gray-700">{{ parte.texto }}</mark>
+                        <ng-container *ngIf="!parte.esCoincidencia">{{ parte.texto }}</ng-container>
+                      </ng-container>
                     </button>
                   </ng-template>
                 </td>
 
                 <!-- Concepto -->
-                <td *ngIf="visible('concepto')" class="px-4 py-2">
+                <td class="px-4 py-2">
                   <input
                     #celdaEnEdicion
                     *ngIf="borrador()?.id === mov.id && borrador()?.campo === 'concepto'; else conceptoTexto"
@@ -247,60 +338,88 @@
                       (click)="editar(mov, 'concepto', mov.concepto)"
                       class="w-full rounded px-2 py-1 text-left transition-colors duration-150 hover:bg-gray-50"
                     >
-                      {{ mov.concepto || '—' }}
+                      <ng-container *ngFor="let parte of partesResaltadas(mov.concepto || '—')">
+                        <mark *ngIf="parte.esCoincidencia"
+                              class="rounded bg-yellow-200 px-0.5 text-gray-700">{{ parte.texto }}</mark>
+                        <ng-container *ngIf="!parte.esCoincidencia">{{ parte.texto }}</ng-container>
+                      </ng-container>
                     </button>
                   </ng-template>
                 </td>
 
                 <!-- Credito -->
-                <td *ngIf="visible('credito')" class="px-4 py-2 text-right">
-                  <input
-                    #celdaEnEdicion
-                    *ngIf="borrador()?.id === mov.id && borrador()?.campo === 'credito'; else creditoTexto"
-                    type="text"
-                    inputmode="decimal"
-                    class="tabular-nums w-full rounded border border-[#004e82]/40 bg-white px-2 py-1 text-right text-sm text-[#16a34a] outline-none focus:border-[#004e82]"
-                    [value]="valorEditable(mov.haber)"
-                    (input)="editar(mov, 'credito', $any($event.target).value)"
-                    (keydown.enter)="confirmarBorrador()"
-                    (keydown.escape)="cancelarBorrador()"
-                    (blur)="confirmarBorrador()"
-                    placeholder="0,00"
-                  />
-                  <ng-template #creditoTexto>
-                    <button
-                      type="button"
-                      (click)="editar(mov, 'credito', valorEditable(mov.haber))"
-                      class="tabular-nums w-full rounded px-2 py-1 text-right transition-colors duration-150 hover:bg-gray-50"
+                <td class="px-4 py-2 text-right">
+                  <ng-container *ngIf="celdaBloqueada(mov, 'credito'); else creditoEditable">
+                    <span
+                      class="tabular-nums block w-full px-2 py-1 text-right text-[13px] text-gray-300"
+                      [title]="'Esta fila ya tiene un débito cargado'"
+                      aria-disabled="true"
                     >
-                      {{ formatear(mov.haber) }}
-                    </button>
+                      —
+                    </span>
+                  </ng-container>
+                  <ng-template #creditoEditable>
+                    <input
+                      #celdaEnEdicion
+                      *ngIf="borrador()?.id === mov.id && borrador()?.campo === 'credito'; else creditoTexto"
+                      type="text"
+                      inputmode="decimal"
+                      class="tabular-nums w-full rounded border border-[#004e82]/40 bg-white px-2 py-1 text-right text-sm text-[#16a34a] outline-none focus:border-[#004e82]"
+                      [value]="valorEditable(mov.haber)"
+                      (input)="editar(mov, 'credito', $any($event.target).value)"
+                      (keydown.enter)="confirmarBorrador()"
+                      (keydown.escape)="cancelarBorrador()"
+                      (blur)="confirmarBorrador()"
+                      placeholder="0,00"
+                    />
+                    <ng-template #creditoTexto>
+                      <button
+                        type="button"
+                        (click)="editar(mov, 'credito', valorEditable(mov.haber))"
+                        class="tabular-nums min-h-[36px] w-full rounded px-2 py-1.5 text-right transition-colors duration-150 hover:bg-gray-50"
+                        [ngClass]="valorDe(mov, 'credito') ? '' : 'text-gray-300'"
+                      >
+                        {{ formatear(mov.haber) || '0,00' }}
+                      </button>
+                    </ng-template>
                   </ng-template>
                 </td>
 
                 <!-- Debito -->
-                <td *ngIf="visible('debito')" class="px-4 py-2 text-right">
-                  <input
-                    #celdaEnEdicion
-                    *ngIf="borrador()?.id === mov.id && borrador()?.campo === 'debito'; else debitoTexto"
-                    type="text"
-                    inputmode="decimal"
-                    class="tabular-nums w-full rounded border border-[#004e82]/40 bg-white px-2 py-1 text-right text-sm text-[#dc2626] outline-none focus:border-[#004e82]"
-                    [value]="valorEditable(mov.debe)"
-                    (input)="editar(mov, 'debito', $any($event.target).value)"
-                    (keydown.enter)="confirmarBorrador()"
-                    (keydown.escape)="cancelarBorrador()"
-                    (blur)="confirmarBorrador()"
-                    placeholder="0,00"
-                  />
-                  <ng-template #debitoTexto>
-                    <button
-                      type="button"
-                      (click)="editar(mov, 'debito', valorEditable(mov.debe))"
-                      class="tabular-nums w-full rounded px-2 py-1 text-right transition-colors duration-150 hover:bg-gray-50"
+                <td class="px-4 py-2 text-right">
+                  <ng-container *ngIf="celdaBloqueada(mov, 'debito'); else debitoEditable">
+                    <span
+                      class="tabular-nums block w-full px-2 py-1 text-right text-[13px] text-gray-300"
+                      [title]="'Esta fila ya tiene un crédito cargado'"
+                      aria-disabled="true"
                     >
-                      {{ formatear(mov.debe) }}
-                    </button>
+                      —
+                    </span>
+                  </ng-container>
+                  <ng-template #debitoEditable>
+                    <input
+                      #celdaEnEdicion
+                      *ngIf="borrador()?.id === mov.id && borrador()?.campo === 'debito'; else debitoTexto"
+                      type="text"
+                      inputmode="decimal"
+                      class="tabular-nums w-full rounded border border-[#004e82]/40 bg-white px-2 py-1 text-right text-sm text-[#dc2626] outline-none focus:border-[#004e82]"
+                      [value]="valorEditable(mov.debe)"
+                      (input)="editar(mov, 'debito', $any($event.target).value)"
+                      (keydown.enter)="confirmarBorrador()"
+                      (keydown.escape)="cancelarBorrador()"
+                      (blur)="confirmarBorrador()"
+                      placeholder="0,00"
+                    />
+                    <ng-template #debitoTexto>
+                      <button
+                        type="button"
+                        (click)="editar(mov, 'debito', valorEditable(mov.debe))"
+                        class="tabular-nums min-h-[36px] w-full rounded px-2 py-1.5 text-right transition-colors duration-150 hover:bg-gray-50"
+                        [ngClass]="valorDe(mov, 'debito') ? '' : 'text-gray-300'"
+                      >
+                        {{ formatear(mov.debe) || '0,00' }}
+                      </button>
+                    </ng-template>
                   </ng-template>
                 </td>
 
@@ -319,7 +438,7 @@
 
               <!-- Errores de la fila -->
               <tr *ngIf="errores().has(mov.id)" class="bg-red-50">
-                <td [attr.colspan]="columnasVisibles().length + 1" class="px-4 pb-3 pt-0">
+                <td [attr.colspan]="columnas.length + 1" class="px-4 pb-3 pt-0">
                   <p class="text-xs text-red-600">
                     <i class="pi pi-exclamation-circle mr-1 text-[10px]"></i>
                     {{ errores().get(mov.id)?.join(' ') }}
@@ -329,7 +448,7 @@
 
               <!-- Error de la celda que se esta por confirmar -->
               <tr *ngIf="borrador()?.id === mov.id && errorCelda()" class="bg-red-50">
-                <td [attr.colspan]="columnasVisibles().length + 1" class="px-4 pb-3 pt-0">
+                <td [attr.colspan]="columnas.length + 1" class="px-4 pb-3 pt-0">
                   <p class="text-xs text-red-600">{{ errorCelda() }}</p>
                 </td>
               </tr>
@@ -353,13 +472,25 @@
          A la izquierda la accion que agrega una fila; a la derecha las que
          cierran el flujo. Confirmar va primero y Cancelar despues. -->
     <footer class="mt-6 flex flex-col-reverse items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between">
-      <button
-        type="button"
-        (click)="agregarMovimiento()"
-        class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-[#004e82] px-4 py-2 text-sm font-medium text-[#004e82] transition-colors duration-200 hover:bg-[#004e82] hover:text-white"
-      >
-        <i class="pi pi-plus text-xs"></i> Agregar movimiento
-      </button>
+      <div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
+        <button
+          type="button"
+          (click)="agregarMovimiento()"
+          class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-[#004e82] px-4 py-2 text-sm font-medium text-[#004e82] transition-colors duration-200 hover:bg-[#004e82] hover:text-white"
+        >
+          <i class="pi pi-plus text-xs"></i> Agregar movimiento
+        </button>
+
+        <button
+          type="button"
+          (click)="deshacer()"
+          [disabled]="!hayCambios()"
+          [title]="hayCambios() ? 'Vuelve a los valores que trajo el extracto del PDF' : 'No hay cambios que deshacer'"
+          class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 transition-colors duration-200 hover:border-gray-400 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <i class="pi pi-undo text-xs"></i> Deshacer cambios
+        </button>
+      </div>
 
       <div class="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
         <button

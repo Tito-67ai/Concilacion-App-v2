@@ -1,4 +1,10 @@
-import { Component, OnInit } from '@angular/core';
+import {
+  ChangeDetectorRef,
+  Component,
+  OnInit,
+  inject,
+  signal,
+} from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -41,14 +47,44 @@ export type LadoConciliable = 'banco' | 'xubio';
   templateUrl: './conciliacion.html'
 })
 export class ConciliacionComponent implements OnInit {
-  movimientosBanco: any[] = [];
-  archivoSeleccionado: File | null = null;
-  cargando: boolean = false;
+  // ------------------------------------------------------------------
+  // Repintado automatico (Zoneless)
+  //
+  // La app corre sin zone.js (Angular 22): mutar un campo en un callback de
+  // HttpClient no notifica a Angular, y la pantalla quedaba mostrando lo
+  // anterior hasta el proximo click. Cada setter de los campos de abajo pasa
+  // por notificar(): el signal avisa al framework de que algo cambio y
+  // markForCheck marca esta vista para el siguiente ciclo de deteccion.
+  //
+  // La API publica no cambia: el template y los tests siguen leyendo y
+  // escribiendo los campos por su nombre, como hacen con "movimientosBanco".
+  // ------------------------------------------------------------------
+  private readonly notificador = signal(0);
+  private readonly cdr = inject(ChangeDetectorRef);
+
+  private notificar(): void {
+    this.notificador.update((n) => n + 1);
+    this.cdr.markForCheck();
+  }
+
+  private _movimientosBanco: any[] = [];
+  get movimientosBanco(): any[] { return this._movimientosBanco; }
+  set movimientosBanco(valor: any[]) { this._movimientosBanco = valor; this.notificar(); }
+
+  private _archivoSeleccionado: File | null = null;
+  get archivoSeleccionado(): File | null { return this._archivoSeleccionado; }
+  set archivoSeleccionado(valor: File | null) { this._archivoSeleccionado = valor; this.notificar(); }
+
+  private _cargando: boolean = false;
+  get cargando(): boolean { return this._cargando; }
+  set cargando(valor: boolean) { this._cargando = valor; this.notificar(); }
 
   // El boton Exportar se pone en guardia mientras se arma el Excel. El tiempo
   // de exportacion depende de la cantidad de filas, no de la de clicks: sin
   // este flag se puede pedir tres veces el mismo archivo.
-  exportando: boolean = false;
+  private _exportando: boolean = false;
+  get exportando(): boolean { return this._exportando; }
+  set exportando(valor: boolean) { this._exportando = valor; this.notificar(); }
 
   // El menu de las dos vias vive en el componente ImportarMenuComponent: la via
   // PDF sale a su propia pantalla (/importar-pdf) y la de tabla entra por el
@@ -62,9 +98,17 @@ export class ConciliacionComponent implements OnInit {
   // El backend expone GET /extractos/bancos para que esta lista no viva
   // hardcodeada en el frontend: agregar un banco es cambiar el extractor, no
   // tocar la pantalla.
-  bancos: string[] = [];
-  bancoSeleccionado: string = '';
-  formatos: string[] = [];
+  private _bancos: string[] = [];
+  get bancos(): string[] { return this._bancos; }
+  set bancos(valor: string[]) { this._bancos = valor; this.notificar(); }
+
+  private _bancoSeleccionado: string = '';
+  get bancoSeleccionado(): string { return this._bancoSeleccionado; }
+  set bancoSeleccionado(valor: string) { this._bancoSeleccionado = valor; this.notificar(); }
+
+  private _formatos: string[] = [];
+  get formatos(): string[] { return this._formatos; }
+  set formatos(valor: string[]) { this._formatos = valor; this.notificar(); }
 
   /**
    * La cuenta y el banco que se eligieron en /importar-pdf.
@@ -78,16 +122,123 @@ export class ConciliacionComponent implements OnInit {
   // Errores del backend. Se muestran en pantalla en vez de un alert generico:
   // el backend ya devuelve el motivo real (columnas que no entiende, archivo
   // que no es PDF, etc.) y con un alert "ocurrio un error" eso se pierde.
-  errorMensaje: string = '';
-  infoMensaje: string = '';
+  private _errorMensaje: string = '';
+  get errorMensaje(): string { return this._errorMensaje; }
+  set errorMensaje(valor: string) { this._errorMensaje = valor; this.notificar(); }
+
+  private _infoMensaje: string = '';
+  get infoMensaje(): string { return this._infoMensaje; }
+  set infoMensaje(valor: string) { this._infoMensaje = valor; this.notificar(); }
 
   // Las tres bandejas que devuelve POST /conciliacion/cruzar. El nombre de la
   // clave importa: el backend responde {exito, resumen, tablas:{...}}, no
   // "movimientos". Leer una clave que no existe deja la tabla vacia sin avisar.
-  cruceRealizado: boolean = false;
-  conciliados: ParConciliado[] = [];
-  pendientesBanco: MovimientoBanco[] = [];
-  pendientesXubio: MovimientoMayor[] = [];
+  private _cruceRealizado: boolean = false;
+  get cruceRealizado(): boolean { return this._cruceRealizado; }
+  set cruceRealizado(valor: boolean) { this._cruceRealizado = valor; this.notificar(); }
+
+  private _conciliados: ParConciliado[] = [];
+  get conciliados(): ParConciliado[] { return this._conciliados; }
+  set conciliados(valor: ParConciliado[]) { this._conciliados = valor; this.notificar(); }
+
+  private _pendientesBanco: MovimientoBanco[] = [];
+  get pendientesBanco(): MovimientoBanco[] { return this._pendientesBanco; }
+  set pendientesBanco(valor: MovimientoBanco[]) { this._pendientesBanco = valor; this.notificar(); }
+
+  private _pendientesXubio: MovimientoMayor[] = [];
+  get pendientesXubio(): MovimientoMayor[] { return this._pendientesXubio; }
+  set pendientesXubio(valor: MovimientoMayor[]) { this._pendientesXubio = valor; this.notificar(); }
+
+  // ------------------------------------------------------------------
+  // Afiliados de Xubio (web) en el inicio del panel derecho
+  //
+  // La API oficial (movimientos/asientos) sigue reservada a planes superiores,
+  // pero la web interna core.xubio.com deja bajar la lista de afiliados con
+  // una cookie de sesion. Apenas se entra a la pantalla se baja esa lista y se
+  // muestra en el panel derecho, donde hasta ahora no habia nada antes del
+  // cruce: el IVA de cada empresa (categoriaFiscal) y cuantos movimientos del
+  // banco tienen posible conciliacion con ella.
+  //
+  // Sin XUBIO_WEB_COOKIE en backend/.env el backend responde 503 a proposito,
+  // sin inventar datos: el panel se queda con el motivo y un boton para
+  // reintentar.
+  // ------------------------------------------------------------------
+  private _afiliados: any[] = [];
+  get afiliados(): any[] { return this._afiliados; }
+  set afiliados(valor: any[]) { this._afiliados = valor; this.notificar(); }
+
+  private _cargandoAfiliados: boolean = false;
+  get cargandoAfiliados(): boolean { return this._cargandoAfiliados; }
+  set cargandoAfiliados(valor: boolean) { this._cargandoAfiliados = valor; this.notificar(); }
+
+  private _afiliadosError: string = '';
+  get afiliadosError(): string { return this._afiliadosError; }
+  set afiliadosError(valor: string) { this._afiliadosError = valor; this.notificar(); }
+  // Una entrada por movimiento del banco, alineada con movimientosBanco
+  // (cruceConAfiliados[i] corresponde a movimientosBanco[i]). La arma el
+  // backend entre los afiliados ya descargados, sin volver a la web de Xubio.
+  private _cruceConAfiliados: any[] = [];
+  get cruceConAfiliados(): any[] { return this._cruceConAfiliados; }
+  set cruceConAfiliados(valor: any[]) { this._cruceConAfiliados = valor; this.notificar(); }
+
+  // Login de Xubio desde la pantalla. Sin XUBIO_WEB_TOKEN/COOKIE el backend
+  // responde 503 y el panel derecho ofrece un formulario de email + contrasena:
+  // el backend los guarda en .env y corre el bot de Playwright con el
+  // navegador visible para renovar la sesion, asi no hay que pegar nada a mano
+  // en el .env ni correr el script aparte.
+  private _xubioSesionRequerida: boolean = false;
+  get xubioSesionRequerida(): boolean { return this._xubioSesionRequerida; }
+  set xubioSesionRequerida(valor: boolean) { this._xubioSesionRequerida = valor; this.notificar(); }
+
+  private _xubioEmail: string = '';
+  get xubioEmail(): string { return this._xubioEmail; }
+  set xubioEmail(valor: string) { this._xubioEmail = valor; this.notificar(); }
+
+  private _xubioPassword: string = '';
+  get xubioPassword(): string { return this._xubioPassword; }
+  set xubioPassword(valor: string) { this._xubioPassword = valor; this.notificar(); }
+
+  private _xubioRenovando: boolean = false;
+  get xubioRenovando(): boolean { return this._xubioRenovando; }
+  set xubioRenovando(valor: boolean) { this._xubioRenovando = valor; this.notificar(); }
+
+  private _xubioLoginError: string = '';
+  get xubioLoginError(): string { return this._xubioLoginError; }
+  set xubioLoginError(valor: string) { this._xubioLoginError = valor; this.notificar(); }
+
+  // Cerrar la sesion de Xubio desde la barra superior: "Salir de Xubio"
+  // olvida token/cookie y el panel vuelve al login; "Cerrar sesion" ademas
+  // borra el email/contraseña guardados en backend/.env.
+  private _sesionXubioAccion: '' | 'salir' | 'cerrar' = '';
+  get sesionXubioAccion(): '' | 'salir' | 'cerrar' { return this._sesionXubioAccion; }
+  set sesionXubioAccion(valor: '' | 'salir' | 'cerrar') { this._sesionXubioAccion = valor; this.notificar(); }
+
+  /** La barra ofrece salir solo mientras hay sesion (el 503 del panel la esconde). */
+  get sesionXubioActiva(): boolean {
+    return !this.cargandoAfiliados && !this.xubioSesionRequerida;
+  }
+
+  // ------------------------------------------------------------------
+  // Filtro por empresa de la bandeja derecha
+  //
+  // Despues del cruce, la bandeja de Xubio se puede filtrar por la empresa
+  // (afiliado) que pago cada movimiento. Para saber de que empresa es cada
+  // fila se reusa el cruce de nombres/CUIT del backend (clasificar-mayor),
+  // igual que el conteo de posibles conciliaciones de la lista de afiliados.
+  // ------------------------------------------------------------------
+
+  // Una entrada por fila de la bandeja derecha, alineada con filasXubio
+  // (clasificacionFilasXubio[i] corresponde a filasXubio[i]). Si la respuesta
+  // llega cuando la bandeja ya cambio (un par manual en el medio), el getter
+  // filasXubioFiltradas la descarta por desalineada y muestra todo.
+  private _clasificacionFilasXubio: any[] = [];
+  get clasificacionFilasXubio(): any[] { return this._clasificacionFilasXubio; }
+  set clasificacionFilasXubio(valor: any[]) { this._clasificacionFilasXubio = valor; this.notificar(); }
+
+  /** '' = todas las empresas, o el id del afiliado seleccionado. */
+  private _empresaFiltro: number | '' = '';
+  get empresaFiltro(): number | '' { return this._empresaFiltro; }
+  set empresaFiltro(valor: number | '') { this._empresaFiltro = valor; this.notificar(); }
 
   // ------------------------------------------------------------------
   // Libro Mayor cargado desde archivo
@@ -101,26 +252,39 @@ export class ConciliacionComponent implements OnInit {
   // exportar. Por eso es condicion del boton Autoconciliar, y el motivo del
   // boton apagado lo dice.
   // ------------------------------------------------------------------
-  movimientosMayor: MovimientoMayor[] = [];
+  private _movimientosMayor: MovimientoMayor[] = [];
+  get movimientosMayor(): MovimientoMayor[] { return this._movimientosMayor; }
+  set movimientosMayor(valor: MovimientoMayor[]) { this._movimientosMayor = valor; this.notificar(); }
   // El nombre del archivo, para que se vea cual quedo cargado si cambia.
-  nombreMayor: string = '';
+  private _nombreMayor: string = '';
+  get nombreMayor(): string { return this._nombreMayor; }
+  set nombreMayor(valor: string) { this._nombreMayor = valor; this.notificar(); }
 
   // El rango de fechas de los filtros. Antes eran dos <input type="date"> con
   // el value puesto en el HTML y sin binding: la pantalla mostraba siempre
   // septiembre de 2026 y lo que el usuario escribiera se perdia. Ahora son las
   // dos cosas, y ademas son de donde sale el periodo del papel de trabajo.
-  fechaDesde: string = '';
-  fechaHasta: string = '';
+  private _fechaDesde: string = '';
+  get fechaDesde(): string { return this._fechaDesde; }
+  set fechaDesde(valor: string) { this._fechaDesde = valor; this.notificar(); }
+
+  private _fechaHasta: string = '';
+  get fechaHasta(): string { return this._fechaHasta; }
+  set fechaHasta(valor: string) { this._fechaHasta = valor; this.notificar(); }
 
   // Estado para controlar qué pestaña está seleccionada (Sin usar la ñ)
-  tabActiva: string = 'a_conciliar';
+  private _tabActiva: string = 'a_conciliar';
+  get tabActiva(): string { return this._tabActiva; }
+  set tabActiva(valor: string) { this._tabActiva = valor; this.notificar(); }
 
   // Oculta de la bandeja las percepciones y los impuestos del banco.
   //
   // Arranca en true: es decir, se ve todo, como antes. No cambiar lo que se
   // muestra sin que alguien lo pida. Cuando se apaga, las filas de categoria
   // 'percepcion' e 'impuesto' desaparecen de la tabla izquierda.
-  mostrarNoOperativas: boolean = true;
+  private _mostrarNoOperativas: boolean = true;
+  get mostrarNoOperativas(): boolean { return this._mostrarNoOperativas; }
+  set mostrarNoOperativas(valor: boolean) { this._mostrarNoOperativas = valor; this.notificar(); }
 
   // ------------------------------------------------------------------
   // Conciliacion manual: arrastrar una fila del banco sobre una de Xubio
@@ -137,16 +301,25 @@ export class ConciliacionComponent implements OnInit {
 
   // La fila que se esta arrastrando, y de que lado salio. Sin esto el drop no
   // sabe que fila se solto: el evento de drop no lo dice.
-  filaArrastrada: any = null;
-  ladoArrastrado: LadoConciliable | null = null;
+  private _filaArrastrada: any = null;
+  get filaArrastrada(): any { return this._filaArrastrada; }
+  set filaArrastrada(valor: any) { this._filaArrastrada = valor; this.notificar(); }
+
+  private _ladoArrastrado: LadoConciliable | null = null;
+  get ladoArrastrado(): LadoConciliable | null { return this._ladoArrastrado; }
+  set ladoArrastrado(valor: LadoConciliable | null) { this._ladoArrastrado = valor; this.notificar(); }
 
   // La fila sobre la que esta el puntero ahora, para pintar el destino. Es
   // distinta de filaArrastrada: una es la que se mueve, esta es la que recibe.
-  filaDestino: any = null;
+  private _filaDestino: any = null;
+  get filaDestino(): any { return this._filaDestino; }
+  set filaDestino(valor: any) { this._filaDestino = valor; this.notificar(); }
 
   // Ultimo par manual, para poder deshacerlo. Emparejar a mano se equivoca
   // seguido y sin vuelta atras el error queda en la bandeja para siempre.
-  ultimoPareoManual: { banco: any; xubio: any } | null = null;
+  private _ultimoPareoManual: { banco: any; xubio: any } | null = null;
+  get ultimoPareoManual(): { banco: any; xubio: any } | null { return this._ultimoPareoManual; }
+  set ultimoPareoManual(valor: { banco: any; xubio: any } | null) { this._ultimoPareoManual = valor; this.notificar(); }
 
   /**
    * Solo se arrastra despues de un cruce y mientras se mire la bandeja de
@@ -290,6 +463,10 @@ export class ConciliacionComponent implements OnInit {
     } else {
       this.infoMensaje = 'Par manual armado.';
     }
+
+    // La bandeja cambio: la clasificacion por empresa se rearma contra lo que
+    // queda, para que el filtro siga alineado con las filas visibles.
+    this.clasificarFilasXubio();
   }
 
   /** Vuelve el ultimo par manual a las bandejas de pendientes. */
@@ -302,6 +479,7 @@ export class ConciliacionComponent implements OnInit {
     this.pendientesXubio = [...this.pendientesXubio, ultimo.xubio];
     this.ultimoPareoManual = null;
     this.infoMensaje = 'Se deshizo el último par manual.';
+    this.clasificarFilasXubio();
   }
 
   /**
@@ -343,6 +521,27 @@ export class ConciliacionComponent implements OnInit {
     return this.tabActiva === 'conciliados'
       ? this.conciliados.map((m) => ({ ...m, concepto: m.concepto_xubio }))
       : this.pendientesXubio;
+  }
+
+  /**
+   * La bandeja derecha con el filtro "Empresa" aplicado.
+   *
+   * La clasificacion viaja en paralelo (clasificacionFilasXubio[i] es la de
+   * filasXubio[i]). Si no hay filtro, o la clasificacion no esta alineada con
+   * la bandeja (todavia no llego, o la bandeja cambio mientras volvia), se
+   * muestra todo: un filtro que se aplica a medias es peor que ninguno.
+   */
+  get filasXubioFiltradas(): any[] {
+    if (
+      this.empresaFiltro === '' ||
+      this.clasificacionFilasXubio.length !== this.filasXubio.length
+    ) {
+      return this.filasXubio;
+    }
+    return this.filasXubio.filter((mov, i) => {
+      const afiliado = this.clasificacionFilasXubio[i]?.afiliado;
+      return afiliado && afiliado.id === this.empresaFiltro;
+    });
   }
 
   /**
@@ -391,6 +590,22 @@ export class ConciliacionComponent implements OnInit {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     });
+  }
+
+  /**
+   * Importe de una fila del lado de Xubio, con el signo unificado del mayor.
+   *
+   * El mayor unifica como `debe - haber` (lo que entra es positivo en el DEBE
+   * de un libro), al reves que el banco. Los pares de la pestana de
+   * conciliados guardan aparte el importe unificado del lado de Xubio
+   * (importe_xubio) porque el `importe` del par es el del banco; los
+   * pendientes traen ya unificado el suyo.
+   */
+  importeLadoXubio(mov: any): number {
+    if (mov.importe_xubio !== undefined && mov.importe_xubio !== null) {
+      return Number(mov.importe_xubio);
+    }
+    return Number(mov.importe ?? (mov.debe - mov.haber));
   }
 
   get totalConciliables(): number {
@@ -445,6 +660,11 @@ export class ConciliacionComponent implements OnInit {
       this.importacion.limpiar();
       this.infoMensaje = `Se leyeron ${delFlujo.length} movimientos.`;
     }
+
+    // El panel derecho arranca con los afiliados de Xubio: al entrar se ve la
+    // lista con su IVA, y si los movimientos ya llegaron (flujo PDF) el cruce
+    // con ellos sale apenas se conoce la lista.
+    this.cargarAfiliados();
   }
 
   cargarBancos() {
@@ -469,8 +689,250 @@ export class ConciliacionComponent implements OnInit {
     });
   }
 
+  // ------------------------------------------------------------------
+  // Afiliados de la web de Xubio: el IVA de cada empresa y las posibles
+  // conciliaciones con los movimientos del banco
+  // ------------------------------------------------------------------
+
+  /**
+   * Baja la lista de afiliados de la web de Xubio.
+   *
+   * Se llama apenas se entra a la pantalla. Sin XUBIO_WEB_COOKIE el backend
+   * responde 503 sin llamar a nadie, y el panel derecho muestra el motivo con
+   * un boton para reintentar en vez de inventar datos.
+   */
+  cargarAfiliados() {
+    if (this.cargandoAfiliados) return;
+    this.cargandoAfiliados = true;
+    this.http.get(`${API}/xubio/afiliados`).subscribe({
+      next: (respuesta: any) => {
+        this.afiliados = respuesta.datos ?? [];
+        this.afiliadosError = '';
+        this.cargandoAfiliados = false;
+        // La sesion alcanzo: el login (si estaba) deja de hacer falta.
+        this.xubioSesionRequerida = false;
+        this.xubioLoginError = '';
+        // Si los movimientos ya llegaron (flujo PDF o extracto importado), el
+        // cruce se puede pedir apenas se conoce la lista. Y si la bandeja
+        // derecha ya tiene filas (un cruce hecho antes de que los afiliados
+        // llegaran), ahora se las puede clasificar por empresa.
+        this.cruzarMovimientosConAfiliados();
+        this.clasificarFilasXubio();
+      },
+      error: (error) => {
+        console.error('Error cargando los afiliados de Xubio', error);
+        this.cargandoAfiliados = false;
+        this.afiliados = [];
+        this.cruceConAfiliados = [];
+        this.clasificacionFilasXubio = [];
+        this.afiliadosError = this.mensajeDeError(
+          error,
+          'No se pudieron cargar los afiliados de Xubio. Revisá que FastAPI esté corriendo en el puerto 8000.'
+        );
+        // El 503 es el "sin sesion": en ese caso el panel ofrece el login con
+        // email y contrasena ademas del motivo y el reintentar.
+        this.xubioSesionRequerida = error?.status === 503;
+      }
+    });
+  }
+
+  /**
+   * Manda email/password al backend, que los guarda en backend/.env y renueva
+   * la sesion de Xubio con el navegador visible (el bot de Playwright). Puede
+   * tardar un rato: si Visma pide captcha o una verificacion, se completa a
+   * mano en la ventana que se abre. Cuando vuelve, la lista de afiliados se
+   * pide sola.
+   */
+  iniciarSesionXubio() {
+    if (this.xubioRenovando || !this.xubioEmail.trim() || !this.xubioPassword) return;
+
+    this.xubioRenovando = true;
+    this.xubioLoginError = '';
+
+    this.http
+      .post(`${API}/xubio/login`, {
+        email: this.xubioEmail.trim(),
+        password: this.xubioPassword,
+      })
+      .subscribe({
+        next: () => {
+          this.xubioRenovando = false;
+          this.xubioSesionRequerida = false;
+          // La contrasena no queda dando vueltas en el estado del componente.
+          this.xubioPassword = '';
+          this.cargarAfiliados();
+        },
+        error: (error) => {
+          console.error('Error renovando la sesión de Xubio', error);
+          this.xubioRenovando = false;
+          this.xubioLoginError = this.mensajeDeError(
+            error,
+            'No se pudo renovar la sesión de Xubio. Revisá que FastAPI esté corriendo en el puerto 8000.'
+          );
+        }
+      });
+  }
+
+  /**
+   * "Salir de Xubio": olvida el token/cookie de este backend. La lista de
+   * afiliados se vuelve a pedir y el backend responde 503: el panel derecho
+   * vuelve al login para renovar cuando haga falta.
+   */
+  salirDeXubio() {
+    this.cerrarSesionDeXubio(false);
+  }
+
+  /**
+   * "Cerrar sesión": ademas de la sesion, borra el email/contraseña guardados
+   * en backend/.env (la proxima vez hay que tipearlos de nuevo en el login).
+   */
+  cerrarSesionXubio() {
+    this.cerrarSesionDeXubio(true);
+  }
+
+  private cerrarSesionDeXubio(olvidarCredenciales: boolean) {
+    if (this.sesionXubioAccion) return;
+    this.sesionXubioAccion = olvidarCredenciales ? 'cerrar' : 'salir';
+    this.errorMensaje = '';
+    this.infoMensaje = '';
+
+    const sufijo = olvidarCredenciales ? '?olvidar_credenciales=true' : '';
+    this.http.delete(`${API}/xubio/sesion${sufijo}`).subscribe({
+      next: () => {
+        this.sesionXubioAccion = '';
+        // La sesion quedo vacia en el backend: la lista se pide sola de nuevo,
+        // el 503 la devuelve al login de Xubio y los botones desaparecen.
+        this.xubioSesionRequerida = true;
+        this.afiliados = [];
+        this.afiliadosError = '';
+        this.infoMensaje = olvidarCredenciales
+          ? 'Se cerró la sesión de Xubio y se borraron las credenciales guardadas.'
+          : 'Se cerró la sesión de Xubio. Podés volver a iniciar sesión cuando quieras.';
+        this.cargarAfiliados();
+      },
+      error: (error) => {
+        console.error('Error cerrando la sesión de Xubio', error);
+        this.sesionXubioAccion = '';
+        this.errorMensaje = this.mensajeDeError(
+          error,
+          'No se pudo cerrar la sesión de Xubio. Revisá que FastAPI esté corriendo en el puerto 8000.'
+        );
+      }
+    });
+  }
+
+  /**
+   * Marca cada movimiento del banco con el afiliado que lo pago.
+   *
+   * Los afiliados viajan en el cuerpo de la request: el cruce lo hace el
+   * backend (normalizacion de nombres, CUIT con prioridad) sin volver a la web
+   * de Xubio. Si falta cualquiera de los dos lados no se manda nada.
+   */
+  cruzarMovimientosConAfiliados() {
+    if (this.afiliados.length === 0 || this.movimientosBanco.length === 0) return;
+
+    this.http
+      .post(`${API}/xubio/cruzar-afiliados`, {
+        movimientos: this.movimientosBanco,
+        afiliados: this.afiliados,
+      })
+      .subscribe({
+        next: (respuesta: any) => {
+          this.cruceConAfiliados = respuesta.datos ?? [];
+        },
+        error: (error) => {
+          console.error('Error cruzando los movimientos con los afiliados', error);
+          // No es fatal: la lista con los IVAs sigue visible, solo pierde el
+          // conteo de posibles conciliaciones.
+          this.cruceConAfiliados = [];
+        }
+      });
+  }
+
+  /**
+   * Marca cada fila de la bandeja derecha con el afiliado que le corresponde.
+   *
+   * Igual que cruzarMovimientosConAfiliados pero del lado del mayor: la
+   * normalizacion de nombres y la prioridad del CUIT viven en el backend. Se
+   * rearma cada vez que cambia la bandeja (un cruce nuevo, un par manual, un
+   * cambio de pestana) clasificando la bandeja tal como esta ahora. Sin
+   * afiliados o sin filas no se manda nada, y si la respuesta llega cuando la
+   * bandeja ya cambio, filasXubioFiltradas la descarta por desalineada.
+   */
+  clasificarFilasXubio() {
+    const filas = this.filasXubio;
+    if (this.afiliados.length === 0 || filas.length === 0) return;
+
+    this.http
+      .post(`${API}/xubio/clasificar-mayor`, {
+        movimientos: filas,
+        afiliados: this.afiliados,
+      })
+      .subscribe({
+        next: (respuesta: any) => {
+          this.clasificacionFilasXubio = respuesta.datos ?? [];
+        },
+        error: (error) => {
+          console.error('Error clasificando los movimientos de Xubio por empresa', error);
+          // No es fatal: la bandeja sigue visible, solo pierde el filtro por
+          // empresa (y el desplegable vuelve a "Todas").
+          this.clasificacionFilasXubio = [];
+          this.empresaFiltro = '';
+        }
+      });
+  }
+
+  /** Cuantos afiliados estan inscriptos y por lo tanto facturan IVA. */
+  get afiliadosConIva(): number {
+    return this.afiliados.filter((a) => a.categoriaFiscal === 'Responsable Inscripto').length;
+  }
+
+  /** Cuantos movimientos del banco encontraron un afiliado que los pago. */
+  get totalMovimientosConPosibleConciliacion(): number {
+    return this.cruceConAfiliados.filter((c) => c.afiliado).length;
+  }
+
+  /**
+   * Los afiliados para la tabla del panel derecho, ordenados para que lo que
+   * hay que mirar primero aparezca primero: los que acumulan movimientos con
+   * posible conciliacion (mas arriba el que acumule mas) y despues el resto,
+   * por nombre.
+   */
+  get afiliadosConPosiblesConciliaciones(): any[] {
+    const porId = new Map<number, any>();
+    for (const cruce of this.cruceConAfiliados) {
+      const afiliado = cruce?.afiliado;
+      if (!afiliado) continue;
+      const previo = porId.get(afiliado.id);
+      if (previo) {
+        previo.movimientos += 1;
+      } else {
+        porId.set(afiliado.id, { afiliado, movimientos: 1 });
+      }
+    }
+
+    const conCruces = [...porId.values()];
+    conCruces.sort(
+      (a, b) =>
+        b.movimientos - a.movimientos ||
+        a.afiliado.organizacionNombre.localeCompare(b.afiliado.organizacionNombre)
+    );
+    const sinCruces = this.afiliados
+      .filter((a) => !porId.has(a.id))
+      .map((a) => ({ afiliado: a, movimientos: 0 }))
+      .sort((a, b) => a.afiliado.organizacionNombre.localeCompare(b.afiliado.organizacionNombre));
+
+    return [...conCruces, ...sinCruces];
+  }
+
   cambiarTab(tab: string) {
+    // Clic sobre la pestana que ya esta activa no hace nada: volver a pedir la
+    // clasificacion por empresa seria un request al backend para nada.
+    if (this.tabActiva === tab) return;
     this.tabActiva = tab;
+    // La pestana cambia lo que muestra la bandeja derecha (pendientes o
+    // pares): la clasificacion por empresa se rearma contra lo nuevo.
+    this.clasificarFilasXubio();
   }
 
   /**
@@ -516,6 +978,9 @@ export class ConciliacionComponent implements OnInit {
     this.pendientesXubio = [];
     this.tabActiva = 'a_conciliar';
     this.ultimoPareoManual = null;
+    // La clasificacion de la bandeja apuntaba a filas que ya no existen: se
+    // descarta hasta que un cruce nuevo la rearme.
+    this.clasificacionFilasXubio = [];
   }
 
   procesarTabla(archivo: File) {
@@ -565,6 +1030,10 @@ export class ConciliacionComponent implements OnInit {
             }
             this.cargando = false;
             this.limpiarCruceAnterior();
+            // Un extracto nuevo desalinea el cruce contra afiliados (mismo
+            // indice que movimientosBanco): se descarta y se vuelve a pedir
+            // mas abajo, apenas se sabe cuantos movimientos hay.
+            this.cruceConAfiliados = [];
 
             if (this.movimientosBanco.length === 0) {
               this.errorMensaje = `El archivo se leyó pero no tiene movimientos.`;
@@ -572,6 +1041,10 @@ export class ConciliacionComponent implements OnInit {
             }
 
             this.infoMensaje = `Se leyeron ${this.movimientosBanco.length} movimientos.`;
+
+            // Con el extracto nuevo y los afiliados ya descargados se actualiza
+            // el conteo de posibles conciliaciones del panel derecho.
+            this.cruzarMovimientosConAfiliados();
           },
           error: (error) => {
             console.error("Error procesando el extracto", error);
@@ -921,6 +1394,9 @@ export class ConciliacionComponent implements OnInit {
         // intentaria devolver filas que ya no existen.
         this.ultimoPareoManual = null;
         this.alTerminarArrastre();
+
+        // El filtro por empresa se arma contra la bandeja recien creada.
+        this.clasificarFilasXubio();
 
         // El conteo sale de las propias bandejas y no de "resumen" para que no
         // puedan discordar entre si.

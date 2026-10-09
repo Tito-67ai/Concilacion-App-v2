@@ -52,6 +52,78 @@ describe('ImportacionService', () => {
     expect(servicio.totalCreditos()).toBe(0);
   });
 
+  it('los saldos inicial y final salen del extracto y cierran con los totales', () => {
+    servicio.setMovimientos([
+      { fecha: '2026-07-01', debe: 0, haber: 1000, saldo: 1500 },
+      { fecha: '2026-07-02', debe: 400, haber: 0, saldo: 1100 },
+      { fecha: '2026-07-03', debe: 150, haber: 0, saldo: 950 },
+    ] as any);
+
+    // Apertura = saldo de la primera fila - haber + debe = 500. Cierre = 950.
+    // Como el backend consume la fila de "SALDO ANTERIOR", a la pantalla le
+    // llega deducido de la primera fila, con la misma cuenta que hace aca.
+    expect(servicio.saldoInicial()).toBe(500);
+    expect(servicio.saldoFinal()).toBe(950);
+    // La tarjeta de saldo final tiene que coincidir con la de totales: no puede
+    // haber una cadena que se embolse o regale plata.
+    expect(servicio.saldoFinal()).toBe(
+      servicio.saldoInicial() + servicio.totalCreditos() - servicio.totalDebitos(),
+    );
+  });
+
+  it('editar un importe corre el saldo final sin tocar el inicial', () => {
+    servicio.setMovimientos([
+      { fecha: '2026-07-01', debe: 0, haber: 1000, saldo: 1500 },
+      { fecha: '2026-07-02', debe: 400, haber: 0, saldo: 1100 },
+    ] as any);
+
+    servicio.editarMovimiento(servicio.movimientos()[1].id, { debe: 500 });
+
+    expect(servicio.saldoInicial()).toBe(500);
+    expect(servicio.saldoFinal()).toBe(1000);
+  });
+
+  it('sin movimientos los saldos son cero y no rompen las tarjetas', () => {
+    expect(servicio.saldoInicial()).toBe(0);
+    expect(servicio.saldoFinal()).toBe(0);
+  });
+
+  it('deshacer vuelve a los valores que trajo el extracto', () => {
+    servicio.setMovimientos([
+      { fecha: '2026-07-01', debe: 0, haber: 1000, saldo: 1000 },
+      { fecha: '2026-07-02', debe: 400, haber: 0, saldo: 600 },
+      { fecha: '2026-07-03', debe: 150, haber: 0, saldo: 450 },
+    ] as any);
+
+    expect(servicio.hayCambios()).toBe(false);
+
+    // Se edita un importe, se quita una fila y se agrega otra a mano.
+    servicio.editarMovimiento(servicio.movimientos()[1].id, { debe: 500 });
+    servicio.quitarMovimiento(servicio.movimientos()[2].id);
+    const idAgregado = servicio.agregarMovimiento();
+
+    expect(servicio.hayCambios()).toBe(true);
+
+    servicio.deshacerCambios();
+
+    // Vuelve la foto del PDF: filas originales, sin la agregada a mano.
+    expect(servicio.movimientos().length).toBe(3);
+    expect(servicio.movimientos().map((mov) => mov.debe)).toEqual([0, 400, 150]);
+    expect(servicio.movimientos().map((mov) => mov.saldo)).toEqual([1000, 600, 450]);
+    expect(servicio.movimientos().some((mov) => mov.id === idAgregado)).toBe(false);
+    expect(servicio.hayCambios()).toBe(false);
+  });
+
+  it('sin cambios el deshacer no hace nada', () => {
+    servicio.setMovimientos([{ fecha: '2026-07-01', debe: 0, haber: 100, saldo: 100 }] as any);
+
+    servicio.deshacerCambios();
+
+    expect(servicio.movimientos().length).toBe(1);
+    expect(servicio.movimientos()[0].haber).toBe(100);
+    expect(servicio.hayCambios()).toBe(false);
+  });
+
   it('el destino junta el banco con la cuenta para el badge del encabezado', () => {
     expect(servicio.destino()).toBe('');
 

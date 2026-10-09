@@ -29,7 +29,11 @@ dev = [
     "reportlab>=4.0.0",
     # xlwt escribe .xls BIFF de verdad, que es lo que hay que probar: un .xls
     # renombrado desde .xlsx no pasa la validacion de firma.
-    "xlwt>=1.3.0"
+    "xlwt>=1.3.0",
+    # Bot que renueva la sesion de la web de Xubio
+    # (scripts/obtener_sesion_xubio.py). El navegador se instala una sola vez
+    # con `uv run playwright install chromium`.
+    "playwright>=1.40.0"
 ]
 
 [tool.pytest.ini_options]

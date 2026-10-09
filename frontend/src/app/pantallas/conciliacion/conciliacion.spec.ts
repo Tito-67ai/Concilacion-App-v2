@@ -40,6 +40,10 @@ describe('ConciliacionComponent', () => {
       bancos: ['SANT', 'ICBC', 'GENERICO'],
       formatos: ['pdf', 'tabla']
     });
+    // Tambien pide los afiliados para el panel derecho. Se responde vacio:
+    // asi el resto de los tests no tiene que saber nada de Xubio ni del cruce
+    // de afiliados, que solo sale si hay lista.
+    http.expectOne(`${API}/xubio/afiliados`).flush({ exito: true, cantidad: 0, datos: [] });
   });
 
   afterEach(() => http.verify());
@@ -170,6 +174,7 @@ describe('ConciliacionComponent', () => {
     const recienCreado = TestBed.createComponent(ConciliacionComponent);
     recienCreado.componentInstance.ngOnInit();
     http.expectOne(`${API}/extractos/bancos`).flush({ bancos: [], formatos: [] });
+    http.expectOne(`${API}/xubio/afiliados`).flush({ exito: true, cantidad: 0, datos: [] });
 
     expect(recienCreado.componentInstance.movimientosBanco.length).toBe(1);
     expect(recienCreado.componentInstance.infoMensaje).toContain('1 movimientos');
@@ -182,6 +187,7 @@ describe('ConciliacionComponent', () => {
     const recienCreado = TestBed.createComponent(ConciliacionComponent);
     recienCreado.componentInstance.ngOnInit();
     http.expectOne(`${API}/extractos/bancos`).flush({ bancos: [], formatos: [] });
+    http.expectOne(`${API}/xubio/afiliados`).flush({ exito: true, cantidad: 0, datos: [] });
 
     // Si no se limpiera, al recargar '/' los movimientos aparecerian solos sin
     // que nadie los hubiera importado en esta sesion.
@@ -626,6 +632,13 @@ describe('ConciliacionComponent', () => {
     await fixture.whenStable();
   }
 
+  /** Escribe en un input como lo haria el usuario (modelo y DOM en sincronia). */
+  function escribirEnInput(selector: string, valor: string) {
+    const input = fixture.nativeElement.querySelector(selector) as HTMLInputElement;
+    input.value = valor;
+    input.dispatchEvent(new Event('input'));
+  }
+
   // ------------------------------------------------------------------
   // Exportar: el papel de trabajo FO 02-03
   // ------------------------------------------------------------------
@@ -748,6 +761,7 @@ describe('ConciliacionComponent', () => {
       bancos: ['ICBC', 'SANT'],
       formatos: [],
     });
+    http.expectOne(`${API}/xubio/afiliados`).flush({ exito: true, cantidad: 0, datos: [] });
 
     const encabezado = recienCreado.componentInstance.encabezadoDelPapel();
 
@@ -837,5 +851,433 @@ describe('ConciliacionComponent', () => {
     // Un boton deshabilitado sin explicacion deja al usuario buscando que le
     // falta. Ademas el title no se ve en un celular.
     expect(fixture.nativeElement.textContent).toContain('Todavía no hay una conciliación');
+  });
+
+  // ------------------------------------------------------------------
+  // Afiliados de la web de Xubio en el inicio del panel derecho
+  // ------------------------------------------------------------------
+
+  const AFILIADO_2GTECH = {
+    id: 1,
+    organizacionId: 10,
+    organizacionNombre: '2GTECH ELECTRONICA S.A.',
+    cuit: '30-71234567-8',
+    categoriaFiscal: 'Responsable Inscripto',
+    activo: 1,
+    esProveedor: 0,
+  };
+  const AFILIADO_LIBRERIA = {
+    id: 2,
+    organizacionId: 20,
+    organizacionNombre: 'LIBRERIA EL FARO',
+    cuit: '20-12345678-9',
+    categoriaFiscal: 'Monotributista',
+    activo: 1,
+    esProveedor: 1,
+  };
+
+  /** Pide la lista de afiliados y el backend la manda con estos datos. */
+  function descargarAfiliados(datos: any[]) {
+    component.cargarAfiliados();
+    http.expectOne(`${API}/xubio/afiliados`).flush({
+      exito: true,
+      cantidad: datos.length,
+      datos,
+    });
+  }
+
+  it('al entrar carga los afiliados y el panel derecho muestra su IVA', async () => {
+    descargarAfiliados([AFILIADO_2GTECH, AFILIADO_LIBRERIA]);
+    await fixture.whenStable();
+
+    // Zoneless: mutar el estado y llamar a detectChanges no repinta; hace
+    // falta un evento real del DOM (misma convencion que el resto del spec).
+    expect(clickEnTexto('Movimientos a conciliar')).toBe(true);
+    await fixture.whenStable();
+
+    const texto = fixture.nativeElement.textContent;
+    expect(texto).toContain('2GTECH ELECTRONICA');
+    expect(texto).toContain('LIBRERIA EL FARO');
+    // El IVA de cada empresa: la categoria fiscal que le pone Xubio.
+    expect(texto).toContain('Responsable Inscripto');
+    expect(texto).toContain('Monotributista');
+    expect(texto).toContain('Proveedor');
+    // El resumen de cuantos facturan IVA.
+    expect(texto).toContain('1 con IVA');
+  });
+
+  it('sin cookie los afiliados no se inventan y queda el motivo con reintentar', async () => {
+    component.cargarAfiliados();
+    http.expectOne(`${API}/xubio/afiliados`).flush(
+      { detail: 'XUBIO_WEB_COOKIE no está configurada. Pegá la cookie de la sesión de Xubio en backend/.env.' },
+      { status: 503, statusText: 'Service Unavailable' }
+    );
+    await fixture.whenStable();
+
+    expect(component.afiliados).toEqual([]);
+    expect(component.afiliadosError).toContain('XUBIO_WEB_COOKIE');
+
+    // Zoneless: un evento real del DOM repinta (ver convencion arriba).
+    expect(clickEnTexto('Movimientos a conciliar')).toBe(true);
+    await fixture.whenStable();
+    expect(fixture.nativeElement.textContent).toContain('Reintentar');
+    // El 503 por falta de sesion ademas ofrece el login de Xubio en el mismo
+    // panel, para renovar la sesion sin tocar el .env a mano.
+    expect(component.xubioSesionRequerida).toBe(true);
+    expect(fixture.nativeElement.textContent).toContain('Iniciar sesión en Xubio');
+
+    // Reintentar vuelve a pedir la lista, sin recargar la pagina.
+    expect(clickEnTexto('Reintentar')).toBe(true);
+    http.expectOne(`${API}/xubio/afiliados`).flush({
+      exito: true,
+      cantidad: 1,
+      datos: [AFILIADO_2GTECH],
+    });
+    await fixture.whenStable();
+
+    expect(component.afiliados.length).toBe(1);
+    expect(component.afiliadosError).toBe('');
+    expect(component.xubioSesionRequerida).toBe(false);
+  });
+
+  it('completar el login de Xubio renueva la sesión y recarga los afiliados solo', async () => {
+    component.cargarAfiliados();
+    http.expectOne(`${API}/xubio/afiliados`).flush(
+      { detail: 'XUBIO_WEB_TOKEN no está configurada. Pegá el token de la sesión de Xubio en backend/.env.' },
+      { status: 503, statusText: 'Service Unavailable' }
+    );
+    await fixture.whenStable();
+    expect(component.xubioSesionRequerida).toBe(true);
+
+    // Zoneless: el formulario aparece despues de un evento real del DOM.
+    expect(clickEnTexto('Movimientos a conciliar')).toBe(true);
+    await fixture.whenStable();
+    expect(fixture.nativeElement.textContent).toContain('Iniciar sesión en Xubio');
+
+    escribirEnInput('input[name="xubioEmail"]', 'tito.rodriguez@estudiopiccinini.com.ar');
+    escribirEnInput('input[name="xubioPassword"]', 'contraseña');
+    expect(clickEnTexto('Iniciar sesión')).toBe(true);
+    await fixture.whenStable();
+
+    const login = http.expectOne(`${API}/xubio/login`);
+    expect(login.request.method).toBe('POST');
+    expect(login.request.body).toEqual({
+      email: 'tito.rodriguez@estudiopiccinini.com.ar',
+      password: 'contraseña',
+    });
+    login.flush({ exito: true, sesion: { token: true, cookie: false } });
+    await fixture.whenStable();
+
+    // El login termino (el bot guardo el token): la lista se vuelve a pedir sola.
+    http.expectOne(`${API}/xubio/afiliados`).flush({
+      exito: true,
+      cantidad: 1,
+      datos: [AFILIADO_2GTECH],
+    });
+    await fixture.whenStable();
+
+    expect(component.afiliados.length).toBe(1);
+    expect(component.xubioSesionRequerida).toBe(false);
+    // La contrasena no queda dando vueltas en el estado del componente.
+    expect(component.xubioPassword).toBe('');
+  });
+
+  it('si el bot no puede renovar la sesión, el motivo queda en el formulario para reintentar', async () => {
+    component.cargarAfiliados();
+    http.expectOne(`${API}/xubio/afiliados`).flush(
+      { detail: 'XUBIO_WEB_TOKEN no está configurada. Pegá el token de la sesión de Xubio en backend/.env.' },
+      { status: 503, statusText: 'Service Unavailable' }
+    );
+    await fixture.whenStable();
+
+    // Zoneless: el formulario aparece despues de un evento real del DOM.
+    expect(clickEnTexto('Movimientos a conciliar')).toBe(true);
+    await fixture.whenStable();
+
+    escribirEnInput('input[name="xubioEmail"]', 'a@b.com');
+    escribirEnInput('input[name="xubioPassword"]', 'secreta');
+    expect(clickEnTexto('Iniciar sesión')).toBe(true);
+    await fixture.whenStable();
+
+    const login = http.expectOne(`${API}/xubio/login`);
+    login.flush(
+      { detail: 'No se pudo renovar la sesión de Xubio: el login pidió un link por email.' },
+      { status: 502, statusText: 'Bad Gateway' }
+    );
+    await fixture.whenStable();
+
+    expect(component.xubioLoginError).toContain('No se pudo renovar la sesión de Xubio');
+    expect(component.xubioRenovando).toBe(false);
+    expect(component.xubioSesionRequerida).toBe(true);
+
+    // El formulario sigue en pantalla para corregir y reintentar.
+    expect(clickEnTexto('Movimientos a conciliar')).toBe(true);
+    await fixture.whenStable();
+    expect(fixture.nativeElement.textContent).toContain('Iniciar sesión en Xubio');
+  });
+
+  // ------------------------------------------------------------------
+  // Salir de Xubio / Cerrar sesión desde la barra superior
+  // ------------------------------------------------------------------
+
+  it('con sesión la barra superior ofrece Salir de Xubio y Cerrar sesión', async () => {
+    // El beforeEach respondio los afiliados con exito: hay sesion, aunque la
+    // lista este vacia, y la barra ofrece los dos botones.
+    expect(clickEnTexto('Movimientos a conciliar')).toBe(true);
+    await fixture.whenStable();
+
+    const texto = fixture.nativeElement.textContent;
+    expect(texto).toContain('Salir de Xubio');
+    expect(texto).toContain('Cerrar sesión');
+  });
+
+  it('Salir de Xubio borra la sesión y el panel vuelve al login', async () => {
+    expect(clickEnTexto('Movimientos a conciliar')).toBe(true);
+    await fixture.whenStable();
+
+    expect(clickEnTexto('Salir de Xubio')).toBe(true);
+    await fixture.whenStable();
+
+    const salida = http.expectOne(`${API}/xubio/sesion`);
+    expect(salida.request.method).toBe('DELETE');
+    salida.flush({ exito: true, configurada: false, credenciales: true });
+    await fixture.whenStable();
+
+    // Sin token el backend responde 503: la lista se pide sola de nuevo y el
+    // panel derecho muestra el login de Xubio, sin los botones de la barra.
+    http.expectOne(`${API}/xubio/afiliados`).flush(
+      { detail: 'XUBIO_WEB_TOKEN no está configurada. Pegá el token de la sesión de Xubio en backend/.env.' },
+      { status: 503, statusText: 'Service Unavailable' }
+    );
+    await fixture.whenStable();
+
+    expect(component.xubioSesionRequerida).toBe(true);
+    expect(clickEnTexto('Movimientos a conciliar')).toBe(true);
+    await fixture.whenStable();
+    expect(fixture.nativeElement.textContent).toContain('Iniciar sesión en Xubio');
+    expect(fixture.nativeElement.textContent).not.toContain('Salir de Xubio');
+    expect(fixture.nativeElement.textContent).not.toContain('Cerrar sesión');
+  });
+
+  it('Cerrar sesión borra también las credenciales guardadas', async () => {
+    expect(clickEnTexto('Movimientos a conciliar')).toBe(true);
+    await fixture.whenStable();
+
+    expect(clickEnTexto('Cerrar sesión')).toBe(true);
+    await fixture.whenStable();
+
+    const salida = http.expectOne(`${API}/xubio/sesion?olvidar_credenciales=true`);
+    expect(salida.request.method).toBe('DELETE');
+    salida.flush({ exito: true, configurada: false, credenciales: false });
+    await fixture.whenStable();
+
+    http.expectOne(`${API}/xubio/afiliados`).flush(
+      { detail: 'XUBIO_WEB_TOKEN no está configurada. Pegá el token de la sesión de Xubio en backend/.env.' },
+      { status: 503, statusText: 'Service Unavailable' }
+    );
+    await fixture.whenStable();
+
+    expect(component.xubioSesionRequerida).toBe(true);
+    // El aviso distingue el cierre total del que conserva las credenciales.
+    expect(component.infoMensaje).toContain('se borraron las credenciales');
+  });
+
+  it('cruza los movimientos del banco contra los afiliados ya descargados', async () => {
+    const movimiento = {
+      fecha: '2026-09-01',
+      concepto: 'PAGO 2GTECH ELECTRONICA',
+      debe: 1000,
+      haber: 0,
+      saldo: 9000,
+    };
+    component.movimientosBanco = [movimiento];
+
+    descargarAfiliados([AFILIADO_2GTECH]);
+
+    const peticion = http.expectOne(`${API}/xubio/cruzar-afiliados`);
+    expect(peticion.request.body.movimientos).toEqual([movimiento]);
+    // Los afiliados van en el cuerpo: el cruce no vuelve a la web de Xubio.
+    expect(peticion.request.body.afiliados.length).toBe(1);
+    peticion.flush({
+      exito: true,
+      resumen: { afiliados_reconocidos: 1, sin_reconocer: 0 },
+      datos: [{ indice: 0, afiliado: AFILIADO_2GTECH, metodo: 'nombre' }],
+    });
+    await fixture.whenStable();
+
+    expect(component.totalMovimientosConPosibleConciliacion).toBe(1);
+    expect(component.cruceConAfiliados[0].afiliado.organizacionNombre).toBe('2GTECH ELECTRONICA S.A.');
+  });
+
+  it('cuenta las posibles conciliaciones por afiliado y deja los demas al final', async () => {
+    component.movimientosBanco = [
+      { fecha: '2026-09-01', concepto: 'PAGO 2GTECH', debe: 100, haber: 0, saldo: 100 },
+      { fecha: '2026-09-02', concepto: '2GTECH S.A.', debe: 200, haber: 0, saldo: 200 },
+    ];
+    descargarAfiliados([AFILIADO_2GTECH, AFILIADO_LIBRERIA]);
+    http.expectOne(`${API}/xubio/cruzar-afiliados`).flush({
+      exito: true,
+      resumen: { afiliados_reconocidos: 2, sin_reconocer: 0 },
+      datos: [
+        { indice: 0, afiliado: AFILIADO_2GTECH, metodo: 'nombre' },
+        { indice: 1, afiliado: AFILIADO_2GTECH, metodo: 'nombre' },
+      ],
+    });
+    await fixture.whenStable();
+
+    const ordenados = component.afiliadosConPosiblesConciliaciones;
+    expect(ordenados.length).toBe(2);
+    // El que acumula movimientos va primero con el conteo; el otro al final.
+    expect(ordenados[0].afiliado.organizacionNombre).toBe('2GTECH ELECTRONICA S.A.');
+    expect(ordenados[0].movimientos).toBe(2);
+    expect(ordenados[1].afiliado.organizacionNombre).toBe('LIBRERIA EL FARO');
+    expect(ordenados[1].movimientos).toBe(0);
+  });
+
+  it('despues del cruce con el mayor la bandeja reemplaza a la lista de afiliados', async () => {
+    // Los afiliados llegan antes que los movimientos: no hay cruce todavia.
+    descargarAfiliados([AFILIADO_2GTECH]);
+    await fixture.whenStable();
+
+    component.movimientosBanco = [{ fecha: '2026-09-01', concepto: 'COBRO', debe: 0, haber: 100, saldo: 100 }];
+    component.movimientosMayor = [{ fecha: '2026-09-01', concepto: 'Cobro cliente', debe: 100, haber: 0 }];
+    component.ejecutarAutoconciliacion();
+    http.expectOne(`${API}/conciliacion/cruzar`).flush({
+      exito: true,
+      tablas: {
+        conciliados: [],
+        pendientes_banco: [],
+        pendientes_xubio: [{ fecha: '2026-09-01', concepto: 'Cobro cliente', debe: 100, haber: 0 }],
+      },
+    });
+    await fixture.whenStable();
+
+    // Apenas se arma la bandeja se la clasifica por empresa para el filtro del
+    // panel derecho: esta respuesta viaja sola, no bloquea al cruce.
+    const clasificar = http.expectOne(`${API}/xubio/clasificar-mayor`);
+    expect(clasificar.request.body.movimientos.length).toBe(1);
+    clasificar.flush({
+      exito: true,
+      resumen: { afiliados_reconocidos: 0, sin_reconocer: 1 },
+      datos: [{ indice: 0, afiliado: null, metodo: null }],
+    });
+    await fixture.whenStable();
+
+    expect(component.cruceRealizado).toBe(true);
+    expect(component.filasXubio.length).toBe(1);
+
+    // La bandeja de pendientes vuelve a ser lo que se muestra, no los afiliados.
+    expect(clickEnTexto('Movimientos a conciliar')).toBe(true);
+    await fixture.whenStable();
+    const texto = fixture.nativeElement.textContent;
+    expect(texto).toContain('Cobro cliente');
+    // La tabla de afiliados (con su columna de posible conciliacion) ya no se
+    // dibuja despues del cruce: la bandeja la reemplazo. El nombre de la
+    // empresa solo sobrevive ahora en el filtro "Empresa" de la bandeja.
+    expect(texto).not.toContain('Posible conciliación');
+    expect(texto).toContain('Todas las empresas');
+  });
+
+  // ------------------------------------------------------------------
+  // Filtro por empresa de la bandeja del mayor
+  // ------------------------------------------------------------------
+
+  it('la bandeja del mayor se filtra por empresa con la clasificacion del backend', async () => {
+    component.cruceRealizado = true;
+    component.pendientesXubio = [
+      { fecha: '2026-09-01', concepto: 'Cobro a 2GTECH ELECTRONICA', comprobante: 'FCA-0001-00000001', debe: 100, haber: 0, importe: 100 },
+      { fecha: '2026-09-02', concepto: 'Pago a LIBRERIA', comprobante: null, debe: 0, haber: 40, importe: -40 },
+    ];
+    component.afiliados = [AFILIADO_2GTECH, AFILIADO_LIBRERIA];
+
+    // El backend decide de que afiliado es cada fila (reusa el cruce de
+    // nombres/CUIT) y el componente muestra todo hasta que llega.
+    component.clasificarFilasXubio();
+    http.expectOne(`${API}/xubio/clasificar-mayor`).flush({
+      exito: true,
+      resumen: { afiliados_reconocidos: 1, sin_reconocer: 1 },
+      datos: [
+        { indice: 0, afiliado: AFILIADO_2GTECH, metodo: 'nombre' },
+        { indice: 1, afiliado: null, metodo: null },
+      ],
+    });
+    await fixture.whenStable();
+
+    expect(component.filasXubioFiltradas.length).toBe(2);
+
+    component.empresaFiltro = AFILIADO_2GTECH.id;
+    expect(component.filasXubioFiltradas.length).toBe(1);
+    expect(component.filasXubioFiltradas[0].comprobante).toBe('FCA-0001-00000001');
+  });
+
+  it('sin clasificacion (aun no llego) el filtro no esconde filas', async () => {
+    component.cruceRealizado = true;
+    component.pendientesXubio = [
+      { fecha: '2026-09-01', concepto: 'Cobro a 2GTECH ELECTRONICA', comprobante: 'FCA-0001-00000001', debe: 100, haber: 0, importe: 100 },
+    ];
+    component.afiliados = [AFILIADO_2GTECH];
+
+    component.empresaFiltro = AFILIADO_2GTECH.id;
+    // La clasificacion no esta alineada con la bandeja (0 vs 1 filas): el
+    // filtro no se aplica a medias, se muestra todo.
+    expect(component.filasXubioFiltradas.length).toBe(1);
+  });
+
+  it('el filtro y las columnas de la bandeja aparecen en pantalla', async () => {
+    component.cruceRealizado = true;
+    component.pendientesXubio = [
+      { fecha: '2026-09-01', concepto: 'Cobro a 2GTECH ELECTRONICA', comprobante: 'FCA-0001-00000001', debe: 100, haber: 0, importe: 100 },
+    ];
+    component.afiliados = [AFILIADO_2GTECH];
+    component.clasificarFilasXubio();
+    http.expectOne(`${API}/xubio/clasificar-mayor`).flush({
+      exito: true,
+      resumen: { afiliados_reconocidos: 1, sin_reconocer: 0 },
+      datos: [{ indice: 0, afiliado: AFILIADO_2GTECH, metodo: 'nombre' }],
+    });
+    await fixture.whenStable();
+
+    // Zoneless: un evento real del DOM repinta la bandeja.
+    expect(clickEnTexto('Movimientos a conciliar')).toBe(true);
+    await fixture.whenStable();
+
+    const texto = fixture.nativeElement.textContent;
+    // El desplegable del filtro listando las empresas ya descargadas.
+    expect(texto).toContain('Empresa');
+    expect(texto).toContain('Todas las empresas');
+    expect(texto).toContain('2GTECH ELECTRONICA');
+    // Las columnas de la bandeja: Fecha, Comprobante, Detalle, Importe.
+    expect(texto).toContain('Comprobante');
+    expect(texto).toContain('Detalle');
+    expect(texto).toContain('FCA-0001-00000001');
+  });
+
+  // ------------------------------------------------------------------
+  // Zoneless: el estado repinta solo, sin esperar un click
+  //
+  // El resto del spec clickea la pantalla para repintar porque el builder
+  // zoneless no repinta al mutar una propiedad y llamar a detectChanges()
+  // (convencion de arriba). En produccion nadie clickea para ver los
+  // afiliados: los setters del componente tienen que notificar solos.
+  // Estas dos pruebas documentan ese comportamiento. Si vuelven a rojo es
+  // porque el repintado automatico (notificar() en conciliacion.ts) se rompio.
+  // ------------------------------------------------------------------
+
+  it('los afiliados se dibujan apenas llegan, sin ningun click', async () => {
+    descargarAfiliados([AFILIADO_2GTECH]);
+    await fixture.whenStable();
+
+    // Sin clickEnTexto: la lista tiene que estar en pantalla solita.
+    expect(fixture.nativeElement.textContent).toContain('2GTECH ELECTRONICA');
+  });
+
+  it('asignar movimientos a mano repinta la tabla sin esperar un click', async () => {
+    component.movimientosBanco = [
+      { fecha: '2026-07-01', concepto: 'COBRO DE PRUEBA', debe: 0, haber: 5, saldo: 5 },
+    ];
+    await fixture.whenStable();
+
+    // Sin clickEnTexto: la fila tiene que aparecer en la tabla del banco.
+    expect(fixture.nativeElement.textContent).toContain('COBRO DE PRUEBA');
   });
 });

@@ -34,6 +34,12 @@ export interface MovimientoMayor {
   origen?: string;
   fecha: string | null;
   concepto: string;
+  /**
+   * Número de comprobante del mayor (FCA-0001-00000001, etc.) cuando el export
+   * del contable trae la columna. La bandeja derecha lo muestra en su columna;
+   * si no vino, '—'.
+   */
+  comprobante?: string | null;
   debe: number;
   haber: number;
   /** Signo unificado del mayor: `debe - haber`, al reves que el banco. */
@@ -62,6 +68,13 @@ export interface ParConciliado {
   haber: number;
   saldo: number;
   importe: number;
+  /**
+   * El cruce guarda estos dos del lado de Xubio, que es el que muestra la
+   * bandeja derecha: el comprobante del mayor y su importe unificado
+   * (`debe - haber`, al reves que el `importe` del banco que guarda el par).
+   */
+  comprobante_xubio?: string | null;
+  importe_xubio?: number;
   categoria?: string | null;
   cuadra?: boolean;
   /** Solo lo mandan los pares armados a mano. El cruce automatico no lo trae. */

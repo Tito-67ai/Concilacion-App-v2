@@ -20,6 +20,23 @@ class Settings(BaseSettings):
     XUBIO_CLIENT_ID: str = ""
     XUBIO_CLIENT_SECRET: str = ""
 
+    # API interna del frontend web de Xubio (core.xubio.com), para leer la
+    # lista de afiliados. NO es la API oficial: no acepta Basic, autentica con
+    # la cookie de sesion del navegador o con el token "Authorization: Bearer"
+    # de las peticiones de esa web. Ambas van en el .env local, nunca
+    # versionadas (xubio_web_client.py). Con cualquiera de las dos alcanza;
+    # sin ninguna, los endpoints de afiliados responden 503 sin llamar a nadie.
+    XUBIO_WEB_URL: str = "https://core.xubio.com"
+    XUBIO_WEB_COOKIE: str = ""
+    XUBIO_WEB_TOKEN: str = ""
+
+    # El bot de sesion (sesion_xubio_bot.py) abre el navegador de Playwright
+    # visible por defecto, porque el login de Visma Connect puede pedir captcha
+    # o verificacion que se completa a mano en esa ventana. En un server de
+    # verdad conviene True (invisible), aunque ahi esos pasos no se pueden
+    # completar y el intento falla con un aviso.
+    XUBIO_BOT_HEADLESS: bool = False
+
     # El Angular corre en 4200. Hay que habilitar las dos formas de escribirlo:
     # si se abre http://localhost:4200 el origen es uno, y si se abre
     # http://127.0.0.1:4200 es otro, y el navegador los distingue.

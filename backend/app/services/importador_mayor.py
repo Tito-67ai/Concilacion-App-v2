@@ -118,10 +118,11 @@ def leer_mayor(ruta: str) -> LecturaMayor:
     """
     Convierte el archivo contable en las filas que consume el cruce.
 
-    Cada fila queda como {fecha, concepto, debe, haber}, que es lo que
-    conciliador.conciliar_movimientos espera del lado de Xubio. Sin fecha no hay
-    cruce (la tolerancia se mide en dias), asi que un archivo cuyas fechas no se
-    entienden se rechaza en vez de devolver una bandeja de pendientes eterna.
+    Cada fila queda como {fecha, concepto, comprobante, debe, haber}, que es lo
+    que conciliador.conciliar_movimientos espera del lado de Xubio. Sin fecha no
+    hay cruce (la tolerancia se mide en dias), asi que un archivo cuyas fechas
+    no se entienden se rechaza en vez de devolver una bandeja de pendientes
+    eterna.
     """
     try:
         df = leer_tabla(ruta, es_encabezado=_es_encabezado_de_mayor)
@@ -159,6 +160,17 @@ def leer_mayor(ruta: str) -> LecturaMayor:
 
     for _, fila in df.iterrows():
         concepto = str(_columna(fila, "DETALLE", "Concepto") or "").strip()
+        # El numero de comprobante va por su columna cuando el export la trae
+        # ("Comprobante", "Nro comprobante"...). El traductor de columnas la
+        # deja en REFERENCIA (la misma canonica que usa el extracto bancario
+        # para el numero de operacion); leerla de ahi es lo mismo que leerla de
+        # un nombre que no existe. Sin la columna no se inventa: quedar como
+        # '—' en la bandeja derecha es mejor que confundirla con el detalle.
+        comprobante = (
+            str(_columna(fila, "REFERENCIA") or "").strip() or None
+            if "REFERENCIA" in df.columns
+            else None
+        )
         # La fila de saldo es un resumen del periodo, no un movimiento: si entra
         # queda para siempre en la bandeja de pendientes sin par posible.
         if _es_saldo_inicial(concepto):
@@ -182,6 +194,7 @@ def leer_mayor(ruta: str) -> LecturaMayor:
             {
                 "fecha": fecha,
                 "concepto": concepto,
+                "comprobante": comprobante,
                 "debe": debe,
                 "haber": haber,
             }

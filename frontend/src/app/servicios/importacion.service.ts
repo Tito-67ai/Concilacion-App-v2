@@ -39,6 +39,13 @@ export class ImportacionService {
   private readonly _seleccion = signal<SeleccionImportacion | null>(null);
   private readonly _movimientos = signal<MovimientoImportado[]>([]);
 
+  /**
+   * Copia de los movimientos tal como los devolvio el extractor. Es la foto del
+   * PDF: el deshacer vuelve a estos valores y no a la ultima edicion, porque lo
+   * que el usuario quiere salvar cuando se equivoca es el estado de origen.
+   */
+  private readonly _originales = signal<MovimientoImportado[]>([]);
+
   readonly seleccion = this._seleccion.asReadonly();
 
   /** Nombre del archivo elegido, para el titulo de /procesando-pdf. */
@@ -72,6 +79,34 @@ export class ImportacionService {
   readonly diferencia = computed(() => this.totalCreditos() - this.totalDebitos());
 
   /**
+   * Saldo con el que arranca el periodo y con el que termina.
+   *
+   * El PDF no manda el saldo de apertura como campo aparte: la fila de
+   * "SALDO INICIAL/ANTERIOR" siembra la cadena en el backend y no llega aca
+   * como movimiento. Se deduce de la primera fila igual que hace el backend
+   * cuando el banco no imprime esa fila: apertura = saldo - haber + debe. Y el
+   * saldo final es el de la ultima fila. Ambos salen de los movimientos de la
+   * tabla, asi que se recalculan solos si se edita un importe y siempre cierran
+   * con los totales: final = inicial + creditos - debitos.
+   */
+  readonly saldoInicial = computed(() => {
+    const filas = this._movimientos();
+    if (filas.length === 0) return 0;
+    const primera = filas[0];
+    return (
+      Math.round(
+        ((Number(primera.saldo) || 0) - (Number(primera.haber) || 0) + (Number(primera.debe) || 0)) * 100,
+      ) / 100
+    );
+  });
+
+  readonly saldoFinal = computed(() => {
+    const filas = this._movimientos();
+    if (filas.length === 0) return 0;
+    return filas[filas.length - 1].saldo;
+  });
+
+  /**
    * Donde van a caer los movimientos: extractor del banco mas la cuenta elegida
    * en /importar-pdf. Va en el badge del encabezado de la pantalla de
    * verificacion, que es donde el usuario necesita ver a que cuenta esta
@@ -93,6 +128,7 @@ export class ImportacionService {
   guardar(seleccion: SeleccionImportacion): void {
     this._seleccion.set(seleccion);
     this._movimientos.set([]);
+    this._originales.set([]);
   }
 
   tieneSeleccion(): boolean {
@@ -102,6 +138,7 @@ export class ImportacionService {
   limpiar(): void {
     this._seleccion.set(null);
     this._movimientos.set([]);
+    this._originales.set([]);
   }
 
   /**
@@ -112,11 +149,44 @@ export class ImportacionService {
    * deja tal cual y la pantalla lo lee con optional chaining.
    */
   setMovimientos(movimientos: MovimientoImportado[]): void {
-    this._movimientos.set(
-      this.recalcularSaldos(
-        movimientos.map((mov) => ({ ...mov, id: `mov-${this.contadorId++}` })),
-      ),
+    const conId = this.recalcularSaldos(
+      movimientos.map((mov) => ({ ...mov, id: `mov-${this.contadorId++}` })),
     );
+    this._movimientos.set(conId);
+    // Foto del extracto recien leido: es lo que restaura el deshacer. Los
+    // movimientos nunca se mutan (editar/agregar/quitar reemplazan objetos),
+    // asi que la snapshot se puede guardar por referencia y compartir filas.
+    this._originales.set(conId);
+  }
+
+  /**
+   * True cuando la tabla se alejo de lo que trajo el extracto: se edito un
+   * campo, se agrego una fila o se quito una. Mientras no haya cambios el
+   * boton de deshacer no tiene sentido y se muestra deshabilitado.
+   */
+  readonly hayCambios = computed(() => {
+    const actual = this._movimientos();
+    const original = this._originales();
+    if (actual.length !== original.length) return true;
+    return actual.some(
+      (mov, i) =>
+        mov.fecha !== original[i].fecha ||
+        mov.concepto !== original[i].concepto ||
+        mov.referencia !== original[i].referencia ||
+        mov.debe !== original[i].debe ||
+        mov.haber !== original[i].haber ||
+        mov.saldo !== original[i].saldo ||
+        mov.categoria !== original[i].categoria,
+    );
+  });
+
+  /**
+   * Vuelve a los valores que devolvio el extractor, descartando ediciones,
+   * filas agregadas a mano y bajas. Es el "ctrl z" grueso: no deshace paso a
+   * paso, restaura el estado del PDF, que es contra lo que se revisa.
+   */
+  deshacerCambios(): void {
+    this._movimientos.set(this._originales().slice());
   }
 
   /**

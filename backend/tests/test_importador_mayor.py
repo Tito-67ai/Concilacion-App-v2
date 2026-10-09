@@ -91,6 +91,50 @@ def test_lee_fecha_detalle_debe_haber(tmp_path):
     assert movimientos[1]["haber"] == 4300.0
 
 
+def test_lee_el_numero_de_comprobante_cuando_el_export_lo_trae(tmp_path):
+    """La bandeja derecha muestra Fecha/Comprobante/Detalle/Importe: si el
+    export del contable trae la columna de comprobante, la fila la conserva."""
+    ruta = _xlsx(
+        tmp_path / "mayor.xlsx",
+        ["Fecha", "Comprobante", "Detalle", "Debe", "Haber"],
+        [["01/09/2026", "FCA-0001-00000001", "Cobro cliente SRL", 15000, None]],
+    )
+
+    movimientos = leer_mayor(str(ruta)).datos
+
+    assert len(movimientos) == 1
+    assert movimientos[0]["comprobante"] == "FCA-0001-00000001"
+    assert movimientos[0]["concepto"] == "Cobro cliente SRL"
+
+
+def test_el_numero_de_comprobante_se_reconoce_en_sus_aliases(tmp_path):
+    """El export de Xubio suele llamar a la columna 'Nro comprobante': el
+    traductor de encabezados la conoce como COMPROBANTE igual que 'Comprobante'."""
+    ruta = _xlsx(
+        tmp_path / "mayor.xlsx",
+        ["Fecha", "Nro comprobante", "Debe", "Haber"],
+        [["01/09/2026", "FCA-0001-00000005", 900, None]],
+    )
+
+    movimientos = leer_mayor(str(ruta)).datos
+
+    assert movimientos[0]["comprobante"] == "FCA-0001-00000005"
+
+
+def test_sin_columna_de_comprobante_la_fila_queda_sin_uno(tmp_path):
+    """Un Libro Mayor sin esa columna no inventa numeros: quedar '—' en la
+    bandeja es mejor que confundir el comprobante con el detalle."""
+    ruta = _xlsx(
+        tmp_path / "mayor.xlsx",
+        ["Fecha", "Detalle", "Debe", "Haber"],
+        [["01/09/2026", "Cobro cliente SRL", 15000, None]],
+    )
+
+    movimientos = leer_mayor(str(ruta)).datos
+
+    assert movimientos[0]["comprobante"] is None
+
+
 def test_un_libro_mayor_contable_no_se_toca(tmp_path):
     """Un Libro Mayor de verdad trae 'Debe'/'Haber': ahi el debe es la entrada.
     Solo los movimientos de cuenta (debito = salida) se invierten."""

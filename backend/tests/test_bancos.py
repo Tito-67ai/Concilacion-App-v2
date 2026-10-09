@@ -428,6 +428,45 @@ def test_el_cruce_es_uno_a_uno():
     assert len(resultado["pendientes_xubio"]) == 1
 
 
+def test_el_cruce_conserva_el_comprobante_del_mayor():
+    """La bandeja derecha muestra Fecha/Comprobante/Detalle/Importe: el cruce
+    no puede tirar el numero de comprobante que traia la fila del mayor, ni en
+    los pendientes ni en los pares (donde tambien se guarda el importe unificado
+    del lado de Xubio, distinto del del banco)."""
+    banco = [
+        _mov(date(2026, 7, 1), debe=1000.0),
+        _mov(date(2026, 7, 2), debe=2000.0),
+    ]
+    xubio = [
+        {
+            "fecha": "2026-07-01",
+            "concepto": "Pago 1",
+            "comprobante": "FCA-0001-00000001",
+            "debe": 0.0,
+            "haber": 1000.0,
+        },
+        {
+            "fecha": "2026-07-02",
+            "concepto": "Pago sin par",
+            "comprobante": "FCA-0001-00000003",
+            "debe": 0.0,
+            "haber": 3000.0,
+        },
+    ]
+
+    resultado = conciliar_movimientos(banco, xubio)
+
+    par = resultado["conciliados"][0]
+    assert par["comprobante_xubio"] == "FCA-0001-00000001"
+    # El importe unificado del par se guarda por lado: el de Xubio es
+    # debe - haber, negativo aca porque es una salida.
+    assert par["importe_xubio"] == -1000.0
+
+    pendiente = resultado["pendientes_xubio"][0]
+    assert pendiente["comprobante"] == "FCA-0001-00000003"
+    assert pendiente["importe"] == -3000.0
+
+
 def test_cruce_con_listas_vacias():
     vacio = conciliar_movimientos([], [])
     assert vacio["conciliados"] == []

@@ -65,6 +65,17 @@ type FilaConciliable = MovimientoBanco | MovimientoMayor;
  */
 type FilaXubio = MovimientoMayor & { importe_xubio?: number };
 
+/**
+ * Un tramo del texto de una fila, partido para pintar en amarillo lo que
+ * coincide con el buscador. Se arma en el componente y no con innerHTML a
+ * proposito: el texto viene de un extracto y no tiene por que interpretarse
+ * como HTML.
+ */
+interface TramoResaltado {
+  texto: string;
+  coincide: boolean;
+}
+
 @Component({
   selector: 'app-conciliacion',
   standalone: true,
@@ -626,6 +637,48 @@ export class ConciliacionComponent implements OnInit {
       this.filasBancoVisibles.length > 0 &&
       this.filasBancoFiltradas.length === 0
     );
+  }
+
+  /**
+   * Parte el texto de una fila para pintar en amarillo cada tramo que coincide
+   * con el buscador.
+   *
+   * Sin busqueda (o sin coincidencia) devuelve un solo tramo, asi la tabla se
+   * dibuja igual que antes del buscador. La comparacion es en minusculas para
+   * acompanar el filtro, y recorre todas las apariciones, no solo la primera.
+   */
+  partesResaltadas(texto: string | null | undefined): TramoResaltado[] {
+    const original = texto ?? '';
+    const termino = this.busquedaBanco.trim();
+    if (!termino || !original) {
+      return [{ texto: original, coincide: false }];
+    }
+
+    const partes: TramoResaltado[] = [];
+    const objetivo = termino.toLowerCase();
+    const base = original.toLowerCase();
+    let desde = 0;
+    let indice = base.indexOf(objetivo, desde);
+    while (indice !== -1) {
+      if (indice > desde) {
+        partes.push({ texto: original.slice(desde, indice), coincide: false });
+      }
+      partes.push({
+        texto: original.slice(indice, indice + termino.length),
+        coincide: true,
+      });
+      desde = indice + termino.length;
+      indice = base.indexOf(objetivo, desde);
+    }
+    if (desde < original.length) {
+      partes.push({ texto: original.slice(desde), coincide: false });
+    }
+    return partes;
+  }
+
+  /** Identifica cada tramo por su posicion: el arreglo se rearma en cada ciclo. */
+  trackByIndice(indice: number): number {
+    return indice;
   }
 
   /** Cuantas de las filas visibles serian percepcion o impuesto. Para el badge. */

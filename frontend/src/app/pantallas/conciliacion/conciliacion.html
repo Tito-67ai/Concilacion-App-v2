@@ -296,10 +296,10 @@
                     (dragover)="alArrastrarSobreFila(mov, 'banco', $event)"
                     (drop)="alSoltarSobreFila(mov, 'banco', $event)">
                   <i *ngIf="puedeArrastrar" class="pi pi-bars text-gray-300 text-[10px] mr-1"></i>
-                  {{ mov.fecha }}
+                  <ng-container *ngFor="let tramo of partesResaltadas(mov.fecha); trackBy: trackByIndice"><span [class.bg-yellow-200]="tramo.coincide" [class.rounded-sm]="tramo.coincide">{{ tramo.texto }}</span></ng-container>
                 </td>
                 <td class="px-3 py-2">
-                  {{ mov.concepto }}
+                  <ng-container *ngFor="let tramo of partesResaltadas(mov.concepto); trackBy: trackByIndice"><span [class.bg-yellow-200]="tramo.coincide" [class.rounded-sm]="tramo.coincide">{{ tramo.texto }}</span></ng-container>
                   <span *ngIf="etiquetaCategoria(mov.categoria)"
                         class="ml-1 px-1.5 py-0.5 rounded text-[10px] border border-amber-300 text-amber-700 bg-amber-100">
                     {{ etiquetaCategoria(mov.categoria) }}

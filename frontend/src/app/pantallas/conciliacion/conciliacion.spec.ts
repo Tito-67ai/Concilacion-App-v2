@@ -1334,6 +1334,46 @@ describe('ConciliacionComponent', () => {
     expect(texto).not.toContain('COBRO CLIENTE A');
   });
 
+  it('el resaltado pinta solo lo que coincide, respetando las mayusculas', () => {
+    component.busquedaBanco = 'cliente';
+
+    const tramos = component.partesResaltadas('Cobro CLIENTE A');
+
+    // El texto se rearma entero; solo el tramo encontrado queda marcado.
+    expect(tramos.map((t) => t.texto).join('')).toBe('Cobro CLIENTE A');
+    expect(tramos.filter((t) => t.coincide).map((t) => t.texto)).toEqual(['CLIENTE']);
+  });
+
+  it('el resaltado marca todas las apariciones, no solo la primera', () => {
+    component.busquedaBanco = 'a';
+
+    const coincidentes = component.partesResaltadas('casa').filter((t) => t.coincide);
+
+    expect(coincidentes.map((t) => t.texto)).toEqual(['a', 'a']);
+  });
+
+  it('sin busqueda el texto va en un solo tramo, sin resaltar', () => {
+    expect(component.partesResaltadas('COBRO CLIENTE A')).toEqual([
+      { texto: 'COBRO CLIENTE A', coincide: false },
+    ]);
+  });
+
+  it('lo que coincide con el buscador se pinta en amarillo en la tabla', async () => {
+    component.movimientosBanco = [
+      { fecha: '2026-07-01', concepto: 'COBRO CLIENTE A', debe: 0, haber: 1000, saldo: 1000 },
+    ];
+    await fixture.whenStable();
+
+    const input: HTMLInputElement = fixture.nativeElement.querySelector('input[name="busquedaBanco"]');
+    input.value = 'cliente';
+    input.dispatchEvent(new Event('input'));
+    await fixture.whenStable();
+
+    const resaltado = fixture.nativeElement.querySelector('.bg-yellow-200');
+    expect(resaltado).toBeTruthy();
+    expect(resaltado.textContent).toBe('CLIENTE');
+  });
+
   // ------------------------------------------------------------------
   // Zoneless: el estado repinta solo, sin esperar un click
   //

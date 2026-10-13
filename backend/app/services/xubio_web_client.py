@@ -170,7 +170,13 @@ class XubioWebClient:
         async with httpx.AsyncClient(timeout=60.0, transport=self._transport) as client:
             respuesta = await client.post(url, headers=headers, content=payload_xml)
             respuesta.raise_for_status()
+            ctype = (respuesta.headers.get("content-type") or "").lower()
+            # El webreport real devuelve XML (application/xml o text/xml). Si trae
+            # JSON (tests o fallback), lo parseamos; si no, devolvemos el texto
+            # crudo para que leer_mayor_desde_json lo detecte por <?xml.
+            if "xml" in ctype:
+                return respuesta.text
             try:
                 return respuesta.json()
             except ValueError:
-                return {"respuesta_texto": respuesta.text}
+                return respuesta.text

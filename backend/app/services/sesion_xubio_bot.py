@@ -44,6 +44,16 @@ URL_LOGIN = "https://xubio.com/NXV/vismaConnect/login"
 # Un solo dominio para no mandar cookies de marketing en la peticion.
 DOMINIOS_SESION = {"core.xubio.com", "app.xubio.com"}
 
+# Nombres que identifican una cookie de sesion de Xubio. Importante: las cookies
+# de la app vieja (NXV, framework Faf) que autentica el webreport del Libro
+# Mayor viven en el dominio padre .xubio.com, NO en core.xubio.com, asi que el
+# filtro de cookies es por nombre contra xubio.com y no por subdominio. Incluye
+# las faf* (FAFEMPRESAID, fafUserManuallyLogued...) con las que el reporte
+# reconoce la empresa logueada.
+NOMBRES_COOKIE_SESION = (
+    "session", "jsessionid", "token", "auth", "sba", "sid", "login", "xubio", "faf",
+)
+
 # Selectores investigados en connect.visma.com (login de Visma Connect).
 SELECTOR_EMAIL = "#Username"
 SELECTORES_PASSWORD = [
@@ -109,6 +119,27 @@ def extraer_codigos_reportes(texto: str) -> tuple[str | None, str | None]:
         primer_grupo(texto, PATRONES_EMPRESA),
         primer_grupo(texto, PATRONES_CUENTA),
     )
+
+
+def cookies_de_sesion(cookies: list[dict]) -> str:
+    """Arma el header Cookie con las cookies de sesion de Xubio, sin tracking.
+
+    El webreport del Libro Mayor (app NXV, framework Faf) se autentica con
+    estas cookies: el Bearer alcanza para /ar/sba/api pero para el reporte no,
+    y sin la cookie de sesion contesta "Advertencia de Seguridad". Las cookies
+    de sesion de esa app viven en el dominio padre .xubio.com (sessionID,
+    login, FAFEMPRESAID, las faf*...), no en core.xubio.com: por eso se filtra
+    por nombre contra xubio.com y no por subdominio. Se descartan las de
+    marketing/analytics (poptin, _ga, AWSALB, linkedin...) porque no forman la
+    sesion y solo engordarian el header.
+    """
+    pares = [
+        f"{c['name']}={c['value']}"
+        for c in cookies
+        if "xubio.com" in (c.get("domain") or "")
+        and any(n in c["name"].lower() for n in NOMBRES_COOKIE_SESION)
+    ]
+    return "; ".join(pares)
 
 
 def leer_env(path: Path) -> dict[str, str]:
@@ -567,21 +598,7 @@ async def obtener_sesion_xubio(
 
             print("7. Extrayendo sesion...")
             cookies = await context.cookies()
-            # Solo cookies de sesion reales: del dominio de la app y con nombre
-            # de sesion/autenticacion. Se descartan cookies de balanceador
-            # (AWSALB), marketing y analytics, que no forman la sesion de Xubio
-            # y solo ensuciarian el header Cookie.
-            nombres_sesion = (
-                "session", "token", "auth", "asp.net",
-                "jsessionid", "sba", "xubio", "sid",
-            )
-            pares = [
-                f"{c['name']}={c['value']}"
-                for c in cookies
-                if any(d in (c.get("domain") or "") for d in DOMINIOS_SESION)
-                and any(n in c["name"].lower() for n in nombres_sesion)
-            ]
-            cookie_cruda = "; ".join(pares)
+            cookie_cruda = cookies_de_sesion(cookies)
             print("   url final:", [(p.url) for p in context.pages])
             if captura["empresa"]:
                 print("   empresa del Libro Mayor:", captura["empresa"])

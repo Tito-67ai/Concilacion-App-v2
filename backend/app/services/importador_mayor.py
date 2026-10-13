@@ -246,23 +246,26 @@ def leer_mayor(ruta: str) -> LecturaMayor:
 
 
 # ----------------------------------------------------------------------
-# El mismo mayor, pero por la via web de Xubio (el JSON del webreport)
+# El mismo mayor, pero por la via web de Xubio (el webreport real)
+# ----------------------------------------------------------------------
+#
+# El webreport de Xubio (framework Faf/NXV) NO devuelve JSON: devuelve XML
+# con la estructura:
+#   <root><dataset><fields>...</fields><data>CSV_SEPARADO_POR_PUNTO_Y_COMA</data></dataset></root>
+#
+# El CSV tiene un PK inicial + 43 columnas (FECHA, DEBEMONPRINCIPAL, HABERMONPRINCIPAL,
+# DEBE, HABER, SALDO, DESCRIPCION, COMPROBANTE, etc.). Se parsea directo a
+# DataFrame y se reusa _desde_dataframe, igual que la via archivo.
+#
+# Para no romper tests que usan MAYOR_JSON sintetico, si la entrada es dict/list
+# se intenta el parser JSON viejo (compatibilidad). Si es str con XML, se usa el
+# parser real.
 # ----------------------------------------------------------------------
 
 
-# Nombres con los que el webreport puede guardar las filas dentro del JSON.
-_CLAVES_DE_FILAS = ("data", "datos", "rows", "filas", "registros", "items", "content")
-
-
-def _filas_del_webreport(datos) -> list[dict]:
-    """
-    Las filas del JSON crudo de la grilla, sin asumir como se llama la clave.
-
-    El webreport contesta la grilla sola, o dentro de una lista con nombre
-    ("data", "rows"...). Se busca por nombre conocido y, si no, la primera
-    lista del objeto. Solo sirven las filas tipo objeto: una lista de listas
-    sin encabezado no se puede mapear por nombre de columna.
-    """
+def _filas_del_webreport_json(datos) -> list[dict]:
+    """Parser legacy para tests: el JSON que el test inventaba (p_Fecha, etc.)."""
+    _CLAVES_DE_FILAS = ("data", "datos", "rows", "filas", "registros", "items", "content")
     if isinstance(datos, list):
         crudo = datos
     elif isinstance(datos, dict):
@@ -274,7 +277,6 @@ def _filas_del_webreport(datos) -> list[dict]:
             crudo = next((v for v in datos.values() if isinstance(v, list)), None)
     else:
         crudo = None
-
     if not isinstance(crudo, list):
         return []
     return [fila for fila in crudo if isinstance(fila, dict)]
@@ -286,19 +288,68 @@ def _sin_prefijo_de_parametro(nombre) -> str:
     return texto[2:] if texto[:2].lower() == "p_" else texto
 
 
+def _parsear_webreport_xml(xml_texto: str) -> "pd.DataFrame":
+    """Convierte el XML real del webreport en DataFrame con columnas canonicas.
+
+    El XML tiene <dataset><fields> (metadatos) y <data> (CSV ; y ,).
+    Se extraen los nombres de <field name="...">, se splitte el CSV y se arma
+    el DataFrame. El PK inicial se descarta.
+    """
+    import xml.etree.ElementTree as ET
+
+    raiz = ET.fromstring(xml_texto)
+    dataset = raiz.find("dataset")
+    if dataset is None:
+        raise ErrorDeExtraccion("XML del webreport sin <dataset>")
+
+    campos_elem = dataset.find("fields")
+    if campos_elem is None:
+        raise ErrorDeExtraccion("XML del webreport sin <fields>")
+    nombres = [f.get("name") for f in campos_elem.findall("field")]
+
+    data_elem = dataset.find("data")
+    if data_elem is None or not data_elem.text:
+        raise ErrorDeExtraccion("XML del webreport sin <data> o vacio")
+
+    filas = [r for r in data_elem.text.split(";") if r != ""]
+    if not filas:
+        raise ErrorDeExtraccion("XML del webreport: <data> sin filas")
+
+    # Cada fila: PK + len(nombres) valores. El PK se descarta.
+    esperado = len(nombres) + 1
+    datos = []
+    for fila in filas:
+        partes = fila.split(",")
+        if len(partes) != esperado:
+            continue
+        datos.append(partes[1:])  # descartar PK
+
+    if not datos:
+        raise ErrorDeExtraccion("XML del webreport: ninguna fila con el conteo esperado")
+
+    import pandas as pd
+    df = pd.DataFrame(datos, columns=nombres)
+    return df
+
+
 def leer_mayor_desde_json(datos) -> LecturaMayor:
     """
-    Convierte el JSON crudo del Libro Mayor de Xubio (webreport) en movimientos.
+    Convierte la respuesta cruda del webreport de Xubio en movimientos.
 
-    El webreport arma la grilla como JSON, no como Excel. Para no tener dos
-    maneras de leer un mayor se reusa el mismo traductor de encabezados que la
-    via archivo (importador_tablas): lo propio es el 'p_' con el que el reporte
-    nombra sus parametros ("p_Fecha"), que se saca antes de traducir.
+    Acepta dos formatos:
+    1. XML real (str): <root><dataset><fields>..</fields><data>CSV</data></dataset></root>
+    2. JSON sintético (dict/list): compatibilidad con tests viejos (p_Fecha, etc.)
 
-    Si no encuentra Fecha ni importe, el error dice que columnas habia: es lo
-    unico que sirve para corregir el mapeo contra una respuesta real.
+    En ambos casos delega en _desde_dataframe para reusar el traductor de columnas
+    y la convencion de signos (contable vs cuenta).
     """
-    filas = _filas_del_webreport(datos)
+    # XML real del webreport Faf/NXV
+    if isinstance(datos, str) and datos.lstrip().startswith("<?xml"):
+        df = _parsear_webreport_xml(datos)
+        return _desde_dataframe(df, fuente="El Libro Mayor de Xubio (webreport)")
+
+    # JSON legacy (tests)
+    filas = _filas_del_webreport_json(datos)
     if not filas:
         raise ErrorDeExtraccion(
             "El Libro Mayor de Xubio no trajo movimientos. La grilla llego como "
@@ -308,3 +359,7 @@ def leer_mayor_desde_json(datos) -> LecturaMayor:
     df = pd.DataFrame(filas)
     df.columns = [_sin_prefijo_de_parametro(c) for c in df.columns]
     return _desde_dataframe(df, fuente="El Libro Mayor de Xubio")
+
+
+# Alias para compatibilidad: los tests llaman a esta funcion.
+filas_del_webreport = _filas_del_webreport_json

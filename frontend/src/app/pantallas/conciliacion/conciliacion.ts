@@ -35,6 +35,11 @@ const TIMEOUT_IMPORTACION_MS = 180000;
 // Libro Mayor: son el mismo archivo de Excel con otras columnas adentro.
 const FORMATOS_TABLA = ['.xlsx', '.xls', '.csv'];
 
+// Destino del enlace de ayuda. Vacio a proposito: sin canal de soporte definido
+// es preferible abrir el cliente de correo con el asunto puesto que inventar una
+// direccion. Cuando exista el canal se completa aca.
+const CORREO_SOPORTE = '';
+
 // De que lado de la pantalla sale o cae una fila en el arrastre manual. El cruce
 // manual siempre va de un lado al otro: no tiene sentido soltar una fila del
 // banco sobre otra del banco.
@@ -574,22 +579,22 @@ export class ConciliacionComponent implements OnInit {
     return '';
   }
 
+  /** Enlace de ayuda. Con el destino vacio abre el cliente de correo sin receptor. */
+  get enlaceAyuda(): string {
+    const asunto = encodeURIComponent('Consulta sobre la conciliación bancaria');
+    return `mailto:${CORREO_SOPORTE}?subject=${asunto}`;
+  }
+
   /**
    * Como se muestra un importe en la pantalla.
    *
-   * Va con toLocaleString y no con el numero crudo: un saldo de 1234567.89
-   * pegado en la celda es ilegible, y la idea de la conciliacion es que alguien
-   * lo revise con los numeros a la vista. El signo va siempre adelante para que
-   * un negativo se distinga de un positivo de un vistazo.
+   * Delega en ImportacionService.formatearImporte: era la misma cuenta escrita
+   * dos veces, y los dos lados del cruce tienen que verse igual. El signo va
+   * siempre adelante para que un negativo se distinga de un positivo de un
+   * vistazo.
    */
   formatoImporte(valor: number | null | undefined): string {
-    const numero = Number(valor ?? 0);
-    if (!numero) return '';
-    const signo = numero < 0 ? '-' : '';
-    return signo + Math.abs(numero).toLocaleString('es-AR', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
+    return this.importacion.formatearImporte(valor);
   }
 
   /**

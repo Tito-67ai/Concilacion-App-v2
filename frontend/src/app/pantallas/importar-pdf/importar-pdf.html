@@ -18,24 +18,6 @@
         <span class="rounded-full bg-[#004e82] px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
           Nuevo
         </span>
-
-        <!-- Info con tooltip -->
-        <div class="group relative">
-          <button
-            type="button"
-            class="flex h-6 w-6 items-center justify-center rounded-full text-gray-400 transition-colors duration-200 hover:bg-white hover:text-[#004e82]"
-            aria-describedby="info-cuota"
-          >
-            <i class="pi pi-info-circle text-sm"></i>
-          </button>
-          <div
-            id="info-cuota"
-            role="tooltip"
-            class="pointer-events-none absolute left-0 top-7 z-20 w-56 rounded-md bg-[#004e82] px-3 py-2 text-xs text-white opacity-0 shadow-lg transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100"
-          >
-            Te quedan {{ importacionesRestantes }} importaciones este mes
-          </div>
-        </div>
       </div>
 
       <p class="mt-2 text-sm italic text-gray-500">
@@ -101,6 +83,11 @@
           />
 
           <div
+            [attr.role]="nombreArchivo ? null : 'button'"
+            [attr.tabindex]="nombreArchivo ? null : 0"
+            [attr.aria-label]="nombreArchivo ? null : 'Elegir el PDF del extracto'"
+            (keydown.enter)="abrirSelector()"
+            (keydown.space)="abrirSelector(); $event.preventDefault()"
             (click)="abrirSelector()"
             (dragover)="alArrastrarSobre($event)"
             (dragleave)="alSalirZona($event)"
@@ -201,12 +188,7 @@
       </div>
 
       <!-- Pie del formulario -->
-      <div class="mt-6 flex flex-col gap-3 border-t border-gray-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
-        <p class="flex items-center gap-1.5 text-xs text-gray-400">
-          <i class="pi pi-info-circle text-[11px]"></i>
-          Te quedan {{ importacionesRestantes }} importaciones este mes
-        </p>
-
+      <div class="mt-6 flex flex-col gap-3 border-t border-gray-100 pt-4 sm:flex-row sm:items-center sm:justify-end">
         <div class="flex justify-end gap-2">
           <button
             type="button"

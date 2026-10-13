@@ -258,7 +258,7 @@ export class ImportacionService {
     return filas.map((mov) => {
       saldo += (Number(mov.haber) || 0) - (Number(mov.debe) || 0);
       // Sin redondear, 0.1 + 0.2 deja 0.30000000000000004 en pantalla y el
-      // usuario Cree que el extractor calculo mal.
+      // usuario cree que el extractor calculo mal.
       return { ...mov, saldo: Math.round(saldo * 100) / 100 };
     });
   }

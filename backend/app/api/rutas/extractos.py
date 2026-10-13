@@ -70,7 +70,7 @@ def _verificar_contenido(datos, extension, nombre):
             status_code=400,
             detail=(
                 f"El contenido de '{nombre}' no es "
-                f"{DESCRIPCION_CONTENIDO[extension]}, apesar de la extension "
+                f"{DESCRIPCION_CONTENIDO[extension]}, a pesar de la extension "
                 f"{extension}. Si lo exportaste del portal del banco, fijate que "
                 f"sea el detalle de movimientos y no otro tipo de reporte."
             ),
@@ -135,7 +135,7 @@ def _leer_pdf(banco_id, ruta_pdf):
         # movimientos con len() y un None aca terminaba en un TypeError sin
         # mensaje, que el usuario veia como un 500 opaco.
         logger.error(
-            "Ni el parser de %s ni el motor generico leiaron el PDF", banco_id
+            "Ni el parser de %s ni el motor generico leyeron el PDF", banco_id
         )
         return [], banco_id
     logger.info("El motor generico leyo %d movimientos de %s", len(rescued), banco_id)

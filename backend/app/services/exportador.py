@@ -288,7 +288,7 @@ def _armar_seccion_no_registradas(
     (titulo_esperado, fila_titulo, fila_encabezado, fila_dato) = seccion
 
     # El titulo ya viene de la plantilla y es el texto que la auditoria
-    # reconosce. Solo se escribe si el archivo no lo tiene: si alguien
+    # reconoce. Solo se escribe si el archivo no lo tiene: si alguien
     # edito la plantilla a mano, el papel sale con su texto, no con el
     # nuestro pisando encima.
     celda_titulo = hoja.cell(row=fila_titulo, column=1)

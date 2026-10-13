@@ -15,7 +15,6 @@ import { ImportacionService } from '../../servicios/importacion.service';
 const API = 'http://127.0.0.1:8000/api';
 
 const TAMANO_MAXIMO_MB = 10;
-const IMPORTACIONES_RESTANTES = 3;
 
 interface CuentaContable {
   id: string;
@@ -83,7 +82,6 @@ function validarPdf(control: AbstractControl<File | null>): ValidationErrors | n
 export class ImportarPdfComponent {
   readonly cuentas = CUENTAS_CONTABLES;
   readonly tamanoMaximo = TAMANO_MAXIMO_MB;
-  readonly importacionesRestantes = IMPORTACIONES_RESTANTES;
 
   /**
    * Los bancos salen del backend (GET /extractos/bancos) y no de una lista

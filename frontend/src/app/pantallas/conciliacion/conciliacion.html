@@ -28,14 +28,14 @@
             Cerrar sesión
           </button>
         </ng-container>
-        <a href="#" class="rounded-lg px-2 py-1 text-sm text-[#004e82] underline-offset-4 transition-colors duration-200 hover:bg-[#eaf2f7] hover:underline">Ver ayuda</a>
+        <a [href]="enlaceAyuda" class="rounded-lg px-2 py-1 text-sm text-[#004e82] underline-offset-4 transition-colors duration-200 hover:bg-[#eaf2f7] hover:underline">Ver ayuda</a>
       </div>
     </header>
 
     <!-- Overlay de Carga de FastAPI -->
     <div *ngIf="cargando" class="absolute inset-0 rounded-2xl bg-white/80 z-50 flex flex-col items-center justify-center">
       <i class="pi pi-spin pi-spinner text-[#004e82] text-6xl mb-4"></i>
-      <p class="text-gray-700 font-semibold text-lg">Procesando datos con FastAPI...</p>
+      <p class="text-gray-700 font-semibold text-lg">Procesando datos…</p>
     </div>
 
     <!-- 1. Tarjeta de Filtros -->

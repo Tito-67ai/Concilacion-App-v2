@@ -1253,6 +1253,88 @@ describe('ConciliacionComponent', () => {
   });
 
   // ------------------------------------------------------------------
+  // Buscador de la bandeja del banco
+  // ------------------------------------------------------------------
+
+  it('el buscador filtra la bandeja por concepto', () => {
+    component.movimientosBanco = [
+      { fecha: '2026-07-01', concepto: 'COBRO CLIENTE A', debe: 0, haber: 1000, saldo: 1000 },
+      { fecha: '2026-07-02', concepto: 'PAGO PROVEEDOR', debe: 250, haber: 0, saldo: 750 },
+    ];
+
+    component.busquedaBanco = 'proveedor';
+
+    expect(component.filasBancoFiltradas.length).toBe(1);
+    expect(component.filasBancoFiltradas[0].concepto).toBe('PAGO PROVEEDOR');
+  });
+
+  it('el buscador tambien busca por fecha', () => {
+    component.movimientosBanco = [
+      { fecha: '2026-07-01', concepto: 'COBRO CLIENTE A', debe: 0, haber: 1000, saldo: 1000 },
+      { fecha: '2026-08-15', concepto: 'PAGO PROVEEDOR', debe: 250, haber: 0, saldo: 750 },
+    ];
+
+    component.busquedaBanco = '2026-08';
+
+    expect(component.filasBancoFiltradas.length).toBe(1);
+    expect(component.filasBancoFiltradas[0].concepto).toBe('PAGO PROVEEDOR');
+  });
+
+  it('el buscador ignora mayusculas y espacios sobrantes', () => {
+    component.movimientosBanco = [
+      { fecha: '2026-07-01', concepto: 'COBRO CLIENTE A', debe: 0, haber: 1000, saldo: 1000 },
+    ];
+
+    component.busquedaBanco = '  cobro  ';
+
+    expect(component.filasBancoFiltradas.length).toBe(1);
+  });
+
+  it('el buscador no resucita lo que escondio el toggle de percepciones', () => {
+    component.movimientosBanco = [
+      { fecha: '2026-07-01', concepto: 'COBRO CLIENTE A', debe: 0, haber: 1000, saldo: 1000, categoria: 'operativo' },
+      { fecha: '2026-07-02', concepto: 'PERCEPCION IVA', debe: 21, haber: 0, saldo: 979, categoria: 'percepcion' },
+    ];
+
+    component.mostrarNoOperativas = false;
+    component.busquedaBanco = 'percepcion';
+
+    // El termino coincide con la fila escondida, pero sigue escondida.
+    expect(component.filasBancoFiltradas.length).toBe(0);
+  });
+
+  it('una busqueda sin coincidencias no se cuenta como percepciones', () => {
+    component.movimientosBanco = [
+      { fecha: '2026-07-01', concepto: 'COBRO CLIENTE A', debe: 0, haber: 1000, saldo: 1000, categoria: 'operativo' },
+    ];
+
+    component.busquedaBanco = 'no existe';
+
+    expect(component.filasBancoFiltradas.length).toBe(0);
+    expect(component.busquedaSinCoincidencias).toBe(true);
+  });
+
+  it('el buscador se dibuja y avisa cuantos movimientos quedan', async () => {
+    component.movimientosBanco = [
+      { fecha: '2026-07-01', concepto: 'COBRO CLIENTE A', debe: 0, haber: 1000, saldo: 1000 },
+      { fecha: '2026-07-02', concepto: 'PAGO PROVEEDOR', debe: 250, haber: 0, saldo: 750 },
+    ];
+    await fixture.whenStable();
+
+    const input: HTMLInputElement = fixture.nativeElement.querySelector('input[name="busquedaBanco"]');
+    expect(input).toBeTruthy();
+
+    input.value = 'proveedor';
+    input.dispatchEvent(new Event('input'));
+    await fixture.whenStable();
+
+    const texto = fixture.nativeElement.textContent;
+    expect(texto).toContain('1 de 2');
+    expect(texto).toContain('PAGO PROVEEDOR');
+    expect(texto).not.toContain('COBRO CLIENTE A');
+  });
+
+  // ------------------------------------------------------------------
   // Zoneless: el estado repinta solo, sin esperar un click
   //
   // El resto del spec clickea la pantalla para repintar porque el builder

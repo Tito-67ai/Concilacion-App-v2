@@ -201,6 +201,28 @@
           </div>
         </div>
 
+        <!-- Buscador de la bandeja. Va arriba de todo para que este a mano
+             apenas entran los movimientos, antes de mirar filtro por filtro.
+             Como el resto de los filtros, no se dibuja si no hay nada que
+             filtrar. -->
+        <div class="flex items-center gap-2 mb-3" *ngIf="filasBanco.length > 0">
+          <div class="relative flex-1">
+            <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
+            <input type="text" name="busquedaBanco" [(ngModel)]="busquedaBanco"
+                   aria-label="Buscar movimientos bancarios por concepto o fecha"
+                   placeholder="Buscar por concepto o fecha…"
+                   class="h-8 w-full rounded-lg border border-gray-300 bg-white pl-8 pr-8 text-xs text-gray-700 shadow-sm outline-none transition-colors duration-200 placeholder:text-gray-400 focus:border-[#004e82]">
+            <button *ngIf="busquedaBanco" type="button" (click)="busquedaBanco = ''"
+                    aria-label="Limpiar la búsqueda"
+                    class="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-gray-400 transition-colors duration-150 hover:text-gray-600">
+              <i class="pi pi-times text-[10px]"></i>
+            </button>
+          </div>
+          <span *ngIf="busquedaBanco.trim()" class="text-[11px] text-gray-400 whitespace-nowrap">
+            {{ filasBancoFiltradas.length }} de {{ filasBancoVisibles.length }}
+          </span>
+        </div>
+
         <!-- Toggle de percepciones e impuestos -->
         <div class="flex items-center justify-between mb-3 pb-3 border-b border-gray-100"
              *ngIf="totalNoOperativas > 0">
@@ -222,17 +244,22 @@
         </div>
 
         <!-- Tabla de Datos o Estado Vacío -->
-        <div class="flex-1 flex items-center justify-center" *ngIf="filasBancoVisibles.length === 0">
+        <div class="flex-1 flex items-center justify-center" *ngIf="filasBancoFiltradas.length === 0">
           <p class="text-gray-500 text-sm">
-            <ng-container *ngIf="filasBanco.length > 0; else sinMovimientos">
-              Todo lo que hay acá son percepciones o impuestos.
-              <button class="underline text-[#004e82] hover:text-[#003a61]" (click)="mostrarNoOperativas = true">Mostrarlos</button>
+            <ng-container *ngIf="busquedaSinCoincidencias; else sinBusqueda">
+              No hay movimientos que coincidan con «{{ busquedaBanco.trim() }}».
             </ng-container>
+            <ng-template #sinBusqueda>
+              <ng-container *ngIf="filasBanco.length > 0; else sinMovimientos">
+                Todo lo que hay acá son percepciones o impuestos.
+                <button class="underline text-[#004e82] hover:text-[#003a61]" (click)="mostrarNoOperativas = true">Mostrarlos</button>
+              </ng-container>
+            </ng-template>
             <ng-template #sinMovimientos>Elegí los filtros para visualizar la información</ng-template>
           </p>
         </div>
 
-        <div class="scroll-fino overflow-x-auto" *ngIf="filasBancoVisibles.length > 0">
+        <div class="scroll-fino overflow-x-auto" *ngIf="filasBancoFiltradas.length > 0">
           <table class="w-full text-left text-xs text-gray-600">
             <thead class="bg-[#fafbfc] border-b border-gray-200">
               <tr>
@@ -247,7 +274,7 @@
                    queda en false y el navegador no inicia el arrastre, que es lo
                    que evita que se pueda arrastrar una fila de la lista ya
                    conciliada. -->
-              <tr *ngFor="let mov of filasBancoVisibles"
+              <tr *ngFor="let mov of filasBancoFiltradas"
                   [attr.draggable]="puedeArrastrar"
                   class="border-b border-gray-100 hover:bg-gray-50"
                   [class.cursor-grab]="puedeArrastrar"

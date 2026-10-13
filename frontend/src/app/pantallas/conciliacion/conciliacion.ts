@@ -311,6 +311,13 @@ export class ConciliacionComponent implements OnInit {
   get mostrarNoOperativas(): boolean { return this._mostrarNoOperativas; }
   set mostrarNoOperativas(valor: boolean) { this._mostrarNoOperativas = valor; this.notificar(); }
 
+  // El buscador de la bandeja del banco. Con extractos de cientos de filas,
+  // encontrar un movimiento a ojo es imposible: filtra por concepto y fecha,
+  // que son las columnas de la tabla.
+  private _busquedaBanco: string = '';
+  get busquedaBanco(): string { return this._busquedaBanco; }
+  set busquedaBanco(valor: string) { this._busquedaBanco = valor; this.notificar(); }
+
   // ------------------------------------------------------------------
   // Conciliacion manual: arrastrar una fila del banco sobre una de Xubio
   //
@@ -587,6 +594,38 @@ export class ConciliacionComponent implements OnInit {
       return this.filasBanco;
     }
     return this.filasBanco.filter((m) => !m.categoria || m.categoria === 'operativo');
+  }
+
+  /**
+   * Las filas del banco despues del buscador.
+   *
+   * Filtra sobre lo que ya dejo ver el toggle de percepciones
+   * (filasBancoVisibles): un termino de busqueda no tiene por que resucitar lo
+   * que el usuario acaba de esconder. Busca en concepto y fecha, en
+   * minusculas, para no depender de las mayusculas con las que vino el extracto.
+   */
+  get filasBancoFiltradas(): MovimientoBanco[] {
+    const termino = this.busquedaBanco.trim().toLowerCase();
+    if (!termino) {
+      return this.filasBancoVisibles;
+    }
+    return this.filasBancoVisibles.filter((m) =>
+      (m.concepto ?? '').toLowerCase().includes(termino) ||
+      (m.fecha ?? '').toLowerCase().includes(termino),
+    );
+  }
+
+  /**
+   * Hay una busqueda escrita y filas visibles, pero ninguna coincide. Se usa en
+   * el estado vacio para no decir "son percepciones o impuestos" cuando en
+   * realidad el que filtro todo fue el buscador.
+   */
+  get busquedaSinCoincidencias(): boolean {
+    return (
+      this.busquedaBanco.trim().length > 0 &&
+      this.filasBancoVisibles.length > 0 &&
+      this.filasBancoFiltradas.length === 0
+    );
   }
 
   /** Cuantas de las filas visibles serian percepcion o impuesto. Para el badge. */

@@ -275,12 +275,13 @@ def test_la_tabla3_deja_afuera_los_pagos_operativos_pendientes():
 def test_el_pie_compara_el_saldo_ajustado_con_el_del_extracto():
     hoja = _mayor(exportador.exportar(_solicitud()))
 
-    assert hoja["A22"].value == "Saldo Ajustado"
-    assert hoja["F22"].value == "=F11"  # ultimo saldo de la Tabla 1
-    assert hoja["A23"].value == "Saldo según Extracto"
-    assert hoja["F23"].value == 850
-    assert hoja["A24"].value == "Control de diferencia"
-    assert hoja["F24"].value == "=F22-F23"
+    # Con el nuevo cuadro de subcategorias, el pie se desplaza
+    assert hoja["A27"].value == "Saldo Ajustado"
+    assert hoja["F27"].value == "=F11"  # ultimo saldo de la Tabla 1 (F11)
+    assert hoja["A28"].value == "Saldo según Extracto"
+    assert hoja["F28"].value == 850
+    assert hoja["A29"].value == "Control de diferencia"
+    assert hoja["F29"].value == "=F27-F28"
 
 
 # ----------------------------------------------------------------------
@@ -384,7 +385,9 @@ def test_la_hoja_de_movimientos_escribe_una_sola_vez_las_lineas_repetidas():
 def test_los_importes_tienen_formato_contable_de_dos_decimales():
     hoja = _mayor(exportador.exportar(_solicitud()))
 
-    for coordenada in ("D10", "E10", "F10", "F22"):
+    # D10, E10, F10, F11 son las filas de la Tabla 1 (saldo inicial + 2 movimientos)
+    # F11 es la ultima fila de saldo de la Tabla 1
+    for coordenada in ("D10", "E10", "F10", "F11"):
         assert hoja[coordenada].number_format == FORMATO_CONTABLE
 
 

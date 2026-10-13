@@ -84,6 +84,25 @@ RE_IMPUESTO = re.compile(
     r"|IMPUESTO\s+SOBRE\s+DEBITOS"
 )
 
+# Subcategorias para el cuadro de sumas de la Seccion 3 (FO 02-03).
+# Orden = prioridad de match (el primero que matchea gana).
+SUBCATEGORIAS_GASTO = (
+    ("Ingresos Brutos", re.compile(r"ING\s*BRUTOS\s*PERCEP")),
+    ("IVA", re.compile(r"\bIVA\b|I\s*V\s*A\b|IMPUESTO\s+AL\s+VALOR\s+AGREGADO")),
+    ("Comisiones", re.compile(r"\bCOM\b|COMISION|MANTENIMIENTO")),
+    ("Impuestos", re.compile(r"IMP\s*S\s*/\s*(?:DEB|CRED)|IMPUESTO\s+SOBRE\s+DEBITOS|IMPUESTO\s+LEY\s+25413")),
+    ("Sellado", re.compile(r"SELLAD")),
+)
+
+
+def _subcategoria_gasto(concepto: str) -> str | None:
+    """Clasifica un gasto bancario en su subcategoria para el cuadro de sumas."""
+    texto = _normalizar(concepto)
+    for nombre, patron in SUBCATEGORIAS_GASTO:
+        if patron.search(texto):
+            return nombre
+    return None
+
 
 def clasificar(concepto: str) -> str:
     """

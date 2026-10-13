@@ -242,7 +242,8 @@ def test_la_tabla3_totaliza_los_gastos_pendientes():
     hoja = _mayor(exportador.exportar(_solicitud()))
 
     # La fila de total suma la columna Haber del cuadro.
-    assert hoja["A20"].value == "Total gastos e impuestos pendientes"
+    # Nueva etiqueta en columna B (Documento) y suma en columna E (Haber)
+    assert hoja["B20"].value == "TOTAL SUMA DE DÉBITOS PENDIENTES"
     assert hoja["E20"].value == "=SUM(E19:E19)"
 
 
@@ -262,7 +263,7 @@ def test_la_tabla3_deja_afuera_los_pagos_operativos_pendientes():
     assert hoja["G19"].value == "COMISION"
     assert hoja["E19"].value == 150
     assert hoja["G20"].value != "PAGO PROVEEDOR"
-    assert hoja["A20"].value == "Total gastos e impuestos pendientes"
+    assert hoja["B20"].value == "TOTAL SUMA DE DÉBITOS PENDIENTES"
     assert hoja["E20"].value == "=SUM(E19:E19)"
 
 

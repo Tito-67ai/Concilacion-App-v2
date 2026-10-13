@@ -512,8 +512,25 @@ def _armar_tabla_pendientes_banco(
         fila += 1
 
     ultimo_dato = fila - 1
-    _titulo_seccion(hoja, fila, "Total gastos e impuestos pendientes")
-    _celda_formula(hoja, fila, 5, f"=SUM(E{primer_dato}:E{ultimo_dato})")
+    # Fila de total: etiqueta en Documento (col B) y suma en Haber (col E)
+    _escribir_fila(
+        hoja,
+        fila,
+        [
+            None,                           # A: Fecha (vacío)
+            "TOTAL SUMA DE DÉBITOS PENDIENTES",  # B: Documento
+            "",                             # C: Cuenta
+            None,                           # D: Debe
+            f"=SUM(E{primer_dato}:E{ultimo_dato})",  # E: Haber (suma)
+            None,                           # F: Saldo
+            "",                             # G: Descripción
+        ],
+        centradas={1, 2},
+    )
+    # Formato moneda en la celda de la suma (col E)
+    celda_suma = hoja.cell(row=fila, column=5)
+    celda_suma.number_format = FORMATO_IMPORTE
+    celda_suma.font = FUENTE_TITULO_SECCION
     fila += 1
 
     return fila

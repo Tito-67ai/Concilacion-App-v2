@@ -762,6 +762,95 @@ def _armar_movimientos(
     ultima = fila - 1 if fila > primer_dato else primer_dato
     _armar_cuadro_totales(hoja, primer_dato, ultima)
 
+    # Cuadro de sumas por subcategoria a la derecha de la tabla (empezando en col I).
+    _armar_cuadro_subcategorias_movimientos(hoja, primer_dato, ultima, solicitud.pendientes_banco)
+
+
+def _armar_cuadro_subcategorias_movimientos(
+    hoja: Worksheet,
+    primer_dato: int,
+    ultima: int,
+    pendientes_banco: list[PendienteExport],
+) -> None:
+    """Cuadro de sumas por subcategoria en la hoja Movimientos Bancarios.
+
+    Se escribe a la derecha de la tabla principal (columna I en adelante):
+    I = Concepto, J = Suma Crédito, K = Suma Débito.
+    """
+    from app.services.clasificacion import _subcategoria_gasto
+
+    # Acumular por subcategoria
+    sumas: dict[str, dict[str, float]] = {}
+    for p in pendientes_banco:
+        if not es_gasto_bancario(p.concepto):
+            continue
+        sub = _subcategoria_gasto(p.concepto)
+        if not sub:
+            continue
+        debe = _importe(p.debe)
+        haber = _importe(p.haber)
+        if debe == 0 and haber == 0:
+            continue
+        if sub not in sumas:
+            sumas[sub] = {"credito": 0.0, "debito": 0.0}
+        sumas[sub]["credito"] += haber
+        sumas[sub]["debito"] += debe
+
+    if not sumas:
+        return
+
+    # Columna base: I (9). La tabla principal termina en E (5), cuadro de sumas en G-H (7-8).
+    COL_BASE = 9  # I
+
+    fila = FILA_ENCABEZADO_MOVIMIENTOS  # fila 8, a la altura del encabezado
+    # Encabezados del cuadro
+    encabezados = ["Concepto", "Suma Crédito", "Suma Débito"]
+    for i, titulo in enumerate(encabezados):
+        celda = hoja.cell(row=fila, column=COL_BASE + i, value=titulo)
+        celda.font = FUENTE_ENCABEZADO
+        celda.fill = RELLENO_ENCABEZADO
+        celda.alignment = ALINEACION_CENTRO
+        celda.border = BORDE_CUADRO
+    fila += 1
+
+    for concepto, valores in sumas.items():
+        _escribir_fila(
+            hoja,
+            fila,
+            [
+                concepto,
+                valores["credito"] if valores["credito"] else None,
+                valores["debito"] if valores["debito"] else None,
+            ],
+            columna_base=COL_BASE,
+        )
+        for col in (COL_BASE + 1, COL_BASE + 2):
+            c = hoja.cell(row=fila, column=col)
+            c.number_format = FORMATO_IMPORTE
+            c.alignment = ALINEACION_DERECHA
+            c.border = BORDE_CUADRO
+        fila += 1
+
+    # Fila de totales del cuadro
+    total_credito = sum(v["credito"] for v in sumas.values())
+    total_debito = sum(v["debito"] for v in sumas.values())
+    _escribir_fila(
+        hoja,
+        fila,
+        [
+            "TOTAL",
+            total_credito if total_credito else None,
+            total_debito if total_debito else None,
+        ],
+        columna_base=COL_BASE,
+    )
+    for col in (COL_BASE + 1, COL_BASE + 2):
+        c = hoja.cell(row=fila, column=col)
+        c.number_format = FORMATO_IMPORTE
+        c.alignment = ALINEACION_DERECHA
+        c.font = FUENTE_TITULO_SECCION
+        c.border = BORDE_CUADRO
+
 
 # ----------------------------------------------------------------------
 # Punto de entrada
@@ -797,7 +886,6 @@ def exportar(solicitud: SolicitudExportacion) -> bytes:
         fila, celda_saldo_mayor = _armar_tabla_mayor(mayor, solicitud, pendientes_xubio)
         fila = _armar_tabla_pendientes_contables(mayor, fila, solicitud.pendientes_xubio)
         fila = _armar_tabla_pendientes_banco(mayor, fila, solicitud.pendientes_banco)
-        fila = _armar_cuadro_subcategorias_banco(mayor, fila, solicitud.pendientes_banco)
         _armar_pie_de_control(mayor, fila, solicitud, celda_saldo_mayor)
 
         _armar_movimientos(movimientos, solicitud, pendientes_banco)

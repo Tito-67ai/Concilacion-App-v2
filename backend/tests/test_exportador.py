@@ -334,12 +334,43 @@ def test_la_hoja_de_movimientos_acumula_credito_menos_debito():
     assert hoja["F10"].value == "=F9+E10-D10"
 
 
-def test_la_hoja_de_movimientos_cierra_contra_el_mayor():
+def test_la_hoja_de_movimientos_totaliza_debitos_y_creditos():
     hoja = _movimientos(exportador.exportar(_solicitud()))
 
-    # El ultimo saldo del banco menos el saldo final del mayor.
-    assert hoja["A11"].value == "Control de diferencia"
-    assert hoja["F11"].value == "=F10-'Libro Mayor'!F11"
+    # Una sola fila "TOTALES" al pie del extracto: suma de la columna Debito,
+    # suma de la columna Credito y el saldo de la ultima fila.
+    assert hoja["A11"].value == "TOTALES"
+    assert hoja["D11"].value == "=SUM(D9:D10)"
+    assert hoja["E11"].value == "=SUM(E9:E10)"
+    assert hoja["F11"].value == "=F10"
+
+
+def test_la_hoja_de_movimientos_no_lleva_control_de_diferencia():
+    hoja = _movimientos(exportador.exportar(_solicitud()))
+
+    # El spec saco el control de esta pestana: no hay etiqueta ni formula que
+    # mire al Libro Mayor.
+    assert "Control de diferencia" not in _valores(hoja)
+
+
+def test_la_hoja_de_movimientos_escribe_una_sola_vez_las_lineas_repetidas():
+    hoja = _movimientos(
+        exportador.exportar(
+            _solicitud(
+                movimientos_banco=[
+                    {"fecha": "2026-07-02", "concepto": "COBRO", "haber": 1000, "saldo": 1000},
+                    {"fecha": "2026-07-05", "concepto": "COMISION", "debe": 150, "saldo": 850},
+                    {"fecha": "2026-07-05", "concepto": "COMISION", "debe": 150, "saldo": 850},
+                ]
+            )
+        )
+    )
+
+    # La comision repetida se escribe una sola vez y el TOTALES queda en la
+    # primera fila libre (11), no en la 12.
+    assert hoja["C10"].value == "COMISION"
+    assert hoja["A11"].value == "TOTALES"
+    assert hoja["D11"].value == "=SUM(D9:D10)"
 
 
 # ----------------------------------------------------------------------

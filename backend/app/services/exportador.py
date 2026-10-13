@@ -19,7 +19,8 @@ Estructura (hoja "Libro Mayor"):
 
 Hoja "Movimientos Bancarios": el extracto completo en una sola tabla de 17
 columnas (A-Q) que arranca en la fila 8, con el saldo acumulado por formula
-`=F(anterior)+E-D` y una fila de control contra el mayor al final.
+`=F(anterior)+E-D` y una fila "TOTALES" al pie con las sumas de debitos y
+creditos. Las lineas repetidas del extracto se escriben una sola vez.
 
 Los importes que cruzaron van en amarillo y los debitos del banco pendientes de
 registracion contable, en verde claro (colores del punto 4 del formulario).
@@ -45,6 +46,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from app.models.schemas import (
     EncabezadoConciliacion,
+    MovimientoBancoExport,
     PendienteExport,
     SolicitudExportacion,
 )
@@ -548,17 +550,41 @@ def _armar_pie_de_control(
 # ----------------------------------------------------------------------
 
 
+def _sin_repetidos(
+    movimientos: list[MovimientoBancoExport],
+) -> list[MovimientoBancoExport]:
+    """Descarta las lineas repetidas del extracto, conservando la primera.
+
+    El extractor a veces devuelve la misma linea dos veces y una comision o un
+    impuesto terminan figurando repetidos. Se compara por el contenido visible
+    de la linea menos el saldo: el saldo es un acumulado derivado y no
+    identifica la fila.
+    """
+    vistos = set()
+    unicos: list[MovimientoBancoExport] = []
+    for movimiento in movimientos:
+        clave = (
+            _fecha(movimiento.fecha),
+            (movimiento.concepto or "").strip(),
+            _importe(movimiento.debe),
+            _importe(movimiento.haber),
+            (movimiento.referencia or "").strip(),
+        )
+        if clave in vistos:
+            continue
+        vistos.add(clave)
+        unicos.append(movimiento)
+    return unicos
+
+
 def _armar_movimientos(
-    hoja: Worksheet,
-    solicitud: SolicitudExportacion,
-    celda_saldo_mayor: str,
-    pendientes: Counter,
+    hoja: Worksheet, solicitud: SolicitudExportacion, pendientes: Counter
 ) -> None:
     _escribir_encabezados(hoja, FILA_ENCABEZADO_MOVIMIENTOS, COLUMNAS_MOVIMIENTOS)
 
     fila = FILA_ENCABEZADO_MOVIMIENTOS + 1
     primer_dato = fila
-    for movimiento in solicitud.movimientos_banco:
+    for movimiento in _sin_repetidos(solicitud.movimientos_banco):
         clave = _clave_banco(
             movimiento.fecha,
             movimiento.concepto,
@@ -612,8 +638,14 @@ def _armar_movimientos(
         fila += 1
 
     if fila > primer_dato:
-        _titulo_seccion(hoja, fila, "Control de diferencia")
-        _celda_formula(hoja, fila, 6, f"=F{fila - 1}-'Libro Mayor'!{celda_saldo_mayor}")
+        # Una sola fila de totalizacion al pie del extracto. Sin "Control de
+        # diferencia" ni referencias al Libro Mayor: el spec los saco de esta
+        # pestana.
+        ultima = fila - 1
+        _titulo_seccion(hoja, fila, "TOTALES")
+        _celda_formula(hoja, fila, 4, f"=SUM(D{primer_dato}:D{ultima})")
+        _celda_formula(hoja, fila, 5, f"=SUM(E{primer_dato}:E{ultima})")
+        _celda_formula(hoja, fila, 6, f"=F{ultima}")
 
 
 # ----------------------------------------------------------------------
@@ -652,7 +684,7 @@ def exportar(solicitud: SolicitudExportacion) -> bytes:
         fila = _armar_tabla_pendientes_banco(mayor, fila, solicitud.pendientes_banco)
         _armar_pie_de_control(mayor, fila, solicitud, celda_saldo_mayor)
 
-        _armar_movimientos(movimientos, solicitud, celda_saldo_mayor, pendientes_banco)
+        _armar_movimientos(movimientos, solicitud, pendientes_banco)
         _restaurar_formulas_del_membrete(movimientos)
 
         destino = io.BytesIO()

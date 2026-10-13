@@ -1482,6 +1482,8 @@ export class ConciliacionComponent implements OnInit {
       conciliados: this.conciliados,
       pendientes_banco: this.pendientesBanco,
       pendientes_xubio: this.pendientesXubio,
+      movimientos_mayor: this.movimientosMayor,
+      movimientos_banco: this.movimientosBanco,
       encabezado: this.encabezadoDelPapel(),
     };
   }

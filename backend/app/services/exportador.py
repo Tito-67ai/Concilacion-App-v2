@@ -1,18 +1,27 @@
 ﻿"""Arma el papel de trabajo FO 02-03 a partir del estado de la conciliacion.
 
-La plantilla vive como asset en app/assets/plantillas y se carga con openpyxl en
-vez de recrear el formato en codigo: el membrete (formulario, revision,
-vigencia), los merges, los anchos de columna y el formato de numero de la
-auditoria son cosas que no hay que mantener sincronizadas a mano.
+Estructura (hoja "Libro Mayor"):
 
-Los dos titulos de seccion que ya trae la plantilla se respetan tal cual:
+    Filas 1-6   membrete institucional (viene de la plantilla).
+    Fila 8      encabezado de la Tabla 1 (todos los movimientos del mayor).
+    Fila 9      fila de Saldo Inicial (siempre, con el saldo en la col. F).
+    ...         Tabla 1: Fecha | Documento | Cuenta | Debe | Haber | Saldo |
+                Descripcion | Organizacion | Centro de Costos.
+    ...         Tabla 2 "Partidas contables no registradas en banco." (mayor que
+                no sono en el extracto).
+    ...         Tabla 3 "Partidas en banco pendientes de registracion contable."
+                (extracto que no esta en el mayor).
+    ...         Pie: saldo final segun mayor, saldo final segun banco y el
+                control de diferencia `=F(banco)-F(mayor)`.
 
-    A10  Partidas contables no registradas en banco.
-    A18  Partidas en banco pendientes de registracion contable.
+Hoja "Movimientos Bancarios": el extracto completo en una sola tabla de 17
+columnas (A-Q) que arranca en la fila 8, con el saldo acumulado por formula
+`=F(anterior)+E-D` y una fila de control contra el mayor al final.
 
-La hoja "Movimientos Bancarios" tiene tres bloques lado a lado, que es lo que
-indican los merges del membrete (C2:H2, AF2:AL2 y BJ2:BP2, con el codigo de
-formulario 30 columnas mas alla en cada bloque).
+La plantilla (assets/plantillas/FO 02-03 Conciliación Bancaria.xlsx) aporta solo
+el membrete: el formulario, su codigo, el titulo y las etiquetas azules son de
+la auditoria y no se rehacen en codigo. El cuerpo de las tablas lo escribe este
+modulo. La plantilla se regenera con scripts/generar_plantilla_fo_02_03.py.
 """
 
 from __future__ import annotations
@@ -23,12 +32,10 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from app.models.schemas import (
     EncabezadoConciliacion,
-    ParConciliado,
     PendienteExport,
     SolicitudExportacion,
 )
@@ -39,85 +46,129 @@ NOMBRE_PLANTILLA = "FO 02-03 Conciliación Bancaria.xlsx"
 HOJA_MAYOR = "Libro Mayor"
 HOJA_MOVIMIENTOS = "Movimientos Bancarios"
 
-# Formato de numero heredado de la plantilla: separador de miles, punto para los
-# decimales y guion para el cero. Es el que Excel ya trae definido en las celdas
-# contables del formulario.
-FORMATO_IMPORTE = '_ * #,##0.00_ ;_ * \\-#,##0.00_ ;_ * "-"??_ ;_ @_ '
-FORMATO_FECHA = "dd/mm/yyyy"
+# El formato del spec: miles con coma, dos decimales. El de la plantilla era el
+# contable con guion para el cero; el spec pide este.
+FORMATO_IMPORTE = "#,##0.00"
+FORMATO_FECHA = "yyyy-mm-dd"
 
 # ----------------------------------------------------------------------
-# Layout de la hoja "Libro Mayor"
+# Layout
 # ----------------------------------------------------------------------
 
-# Titulo de la seccion -> (fila del titulo, fila del encabezado, fila del primer
-# dato). Los titulos ya estan en la plantilla (A10 y A18); el encabezado se
-# escribe una fila abajo de cada uno.
-SECCIONES_MAYOR = [
-    ("Partidas contables no registradas en banco.", 10, 11, 12),
-    ("Partidas en banco pendientes de registración contable.", 18, 19, 20),
-]
+FILA_ENCABEZADO_TABLA1 = 8
+FILA_ENCABEZADO_MOVIMIENTOS = 8
 
-# Cada seccion manda su propia convencion. Las partidas contables repiten la
-# firma del Excel de Xubio ("Debito en $"/"Credito en $") y las partidas en
-# banco conservan la lectura del extracto (Debe/Haber/Importe).
-COLUMNAS_MAYOR_XUBIO = ["Fecha", "Concepto", "Debito en $", "Credito en $"]
-COLUMNAS_MAYOR_BANCO = ["Fecha", "Concepto", "Debe", "Haber", "Importe"]
-
-# Anchos (caracteres) para las columnas que usa la hoja Libro Mayor.
-ANCHOS_MAYOR = {"A": 15.7, "B": 20.9, "C": 14.0, "D": 14.0, "E": 14.0}
-
-# ----------------------------------------------------------------------
-# Layout de la hoja "Movimientos Bancarios"
-# ----------------------------------------------------------------------
-
-# Columna en la que arranca cada bloque. Los 30 de separacion salen del
-# membrete de la plantilla: el codigo "FO 02-03" esta en I1, AM1 y BQ1.
-BLOQUES_MOVIMIENTOS = [
-    (1, "Movimientos Bancarios"),
-    (31, "Libro Mayor"),
-    (61, "Conciliación"),
-]
-
-COLUMNAS_MOVIMIENTOS = [
+COLUMNAS_TABLA1 = [
     "Fecha",
-    "Concepto",
+    "Documento",
+    "Cuenta",
     "Debe",
     "Haber",
-    "Importe",
     "Saldo",
-    "Categoría",
-    "Origen",
+    "Descripción",
+    "Organización",
+    "Centro de Costos",
+]
+COLUMNAS_TABLA2 = [
+    "Fecha",
+    "Documento",
+    "Cuenta",
+    "Debe",
+    "Haber",
+    "Saldo",
+    "Descripción",
+    "Organización",
+]
+COLUMNAS_TABLA3 = [
+    "Fecha",
+    "Documento",
+    "Cuenta",
+    "Debe",
+    "Haber",
+    "Saldo",
+    "Descripción",
+]
+COLUMNAS_MOVIMIENTOS = [
+    "Fecha contable",
+    "Cod de Concepto",
+    "Concepto",
+    "Debito en $",
+    "Credito en $",
+    "Saldo en $",
+    "Informacion Complementaria",
+    "Nro de cheque",
+    "Sucursal Origen",
+    "Canal",
+    "Banco",
+    "CBU/Alias",
+    "Tipo trf",
+    "Referencia",
+    "Nombre",
+    "Tipo doc",
+    "Nro doc",
 ]
 
-# Ancho por posicion dentro de un bloque (0 = Fecha, 1 = Concepto, ...).
-ANCHOS_POR_POSICION = [12.0, 34.0, 13.0, 13.0, 13.0, 13.0, 12.0, 12.0]
+TITULO_PARTIDAS_CONTABLES = "Partidas contables no registradas en banco."
+TITULO_PARTIDAS_BANCO = "Partidas en banco pendientes de registración contable."
 
-FILA_TITULO_MOVIMIENTOS = 7
-FILA_ENCABEZADO_MOVIMIENTOS = 8
-FILA_PRIMER_DATO_MOVIMIENTOS = 9
+# Anchos (caracteres) por columna. Los de importe (D/E/F) son anchos a
+# proposito: con el separador de miles y dos decimales, un importe como
+# 99.999.999.999,99 ocupa ~17 caracteres; con 14 Excel lo tapa con "#######".
+ANCHOS_MAYOR = {
+    "A": 12.0,
+    "B": 18.0,
+    "C": 14.0,
+    "D": 18.0,
+    "E": 18.0,
+    "F": 20.0,
+    "G": 40.0,
+    "H": 22.0,
+    "I": 18.0,
+}
+ANCHOS_MOVIMIENTOS = {
+    "A": 14.0,
+    "B": 14.0,
+    "C": 34.0,
+    "D": 18.0,
+    "E": 18.0,
+    "F": 20.0,
+    "G": 24.0,
+    "H": 12.0,
+    "I": 16.0,
+    "J": 12.0,
+    "K": 12.0,
+    "L": 22.0,
+    "M": 12.0,
+    "N": 20.0,
+    "O": 24.0,
+    "P": 10.0,
+    "Q": 16.0,
+}
 
 # ----------------------------------------------------------------------
 # Estilos
 # ----------------------------------------------------------------------
 
-# El alpha va FF (opaco) a proposito: el mismo azul de la etiqueta "Empresa:"
-# de la plantilla. Con alpha 00 Excel pinta el relleno como transparente.
+# El alpha va FF (opaco): el mismo azul de las etiquetas "Empresa:" de la
+# plantilla. Con alpha 00 Excel pinta el relleno como transparente.
 RELLENO_ENCABEZADO = PatternFill("solid", fgColor="FF00B0F0")
 FUENTE_ENCABEZADO = Font(name="Calibri", size=11, bold=True)
-FUENTE_TITULO_BLOQUE = Font(name="Calibri", size=11, bold=True)
-FUENTE_TOTAL = Font(name="Calibri", size=11, bold=True)
-ALINEACION_DERECHA = Alignment(horizontal="right")
+FUENTE_TITULO_SECCION = Font(name="Calibri", size=11, bold=True)
+# shrink_to_fit: red de seguridad. Si un importe supera el ancho de la
+# columna, Excel lo achica en vez de taparlo con "#######".
+ALINEACION_DERECHA = Alignment(horizontal="right", shrink_to_fit=True)
 ALINEACION_CENTRO = Alignment(horizontal="center")
-
-BORDE_TOTAL = Border(top=Side(style="thin"), bottom=Side(style="double"))
+ALINEACION_IZQUIERDA = Alignment(horizontal="left")
+BORDE_ENCABEZADO = Border(bottom=Side(style="thin"))
 
 
 def ruta_plantilla() -> Path:
     return DIRECTORIO_PLANTILLAS / NOMBRE_PLANTILLA
 
 
-def _columna(base: int, desplazamiento: int) -> str:
-    return get_column_letter(base + desplazamiento)
+# ----------------------------------------------------------------------
+# Normalizacion de valores
+# ----------------------------------------------------------------------
 
 
 def _importe(valor: object) -> float:
@@ -147,7 +198,7 @@ def _fecha(valor: object) -> date | None:
 
 
 def _periodo_a_fecha(periodo: str | None) -> date | None:
-    """'2026-09' o 'septiembre 2026' -> un date, para la celda con formato mes."""
+    """'2026-09' -> un date, para la celda del periodo."""
     if not periodo:
         return None
     texto = periodo.strip()
@@ -156,38 +207,85 @@ def _periodo_a_fecha(periodo: str | None) -> date | None:
             return datetime.strptime(texto, formato).date()
         except ValueError:
             continue
-    # Sin formato reconocible se escribe el texto tal cual: la celda va a
-    # mostrarlo, pero no se pisa el dato que mando el usuario.
     return None
 
 
-MESES = [
-    "enero", "febrero", "marzo", "abril", "mayo", "junio",
-    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
-]
-
-ETIQUETA_ORIGEN = {
-    "banco": "Banco",
-    "xubio": "Libro Mayor",
-}
+def _saldo_final_banco(solicitud: SolicitudExportacion) -> float:
+    if solicitud.saldo_final_banco is not None:
+        return _importe(solicitud.saldo_final_banco)
+    if solicitud.movimientos_banco:
+        return _importe(solicitud.movimientos_banco[-1].saldo)
+    return 0.0
 
 
-def _etiqueta_categoria(categoria: str | None) -> str:
-    if categoria == "percepcion":
-        return "Percepción"
-    if categoria == "impuesto":
-        return "Impuesto"
-    if categoria == "operativo":
-        return "Operativo"
-    return categoria or ""
+# ----------------------------------------------------------------------
+# Escritura de celdas
+# ----------------------------------------------------------------------
 
 
-def _escribir_encabezado(hoja: Worksheet, encabezado: EncabezadoConciliacion) -> None:
-    """Los cuatro campos del membrete.
+def _formatear(celda, valor: object) -> None:
+    """Fecha -> centrada; numero -> derecha con dos decimales; resto -> izquierda."""
+    if isinstance(valor, datetime):
+        valor = valor.date()
+    if isinstance(valor, date):
+        celda.number_format = FORMATO_FECHA
+        celda.alignment = ALINEACION_CENTRO
+    elif isinstance(valor, (int, float)) and not isinstance(valor, bool):
+        celda.number_format = FORMATO_IMPORTE
+        celda.alignment = ALINEACION_DERECHA
+    else:
+        celda.alignment = ALINEACION_IZQUIERDA
 
-    Solo en la hoja Libro Mayor: la de Movimientos Bancarios los trae por
-    formula (=+'Libro Mayor'!B5 y companhia) y hay que respetar esas formulas en
-    vez de pisarlas con un valor.
+
+def _escribir_fila(hoja: Worksheet, fila: int, valores: list, centradas=()) -> None:
+    for indice, valor in enumerate(valores):
+        celda = hoja.cell(row=fila, column=indice + 1)
+        celda.value = valor
+        _formatear(celda, valor)
+        if indice in centradas:
+            celda.alignment = ALINEACION_CENTRO
+
+
+def _celda_importe(hoja: Worksheet, fila: int, columna: int, valor: float) -> None:
+    celda = hoja.cell(row=fila, column=columna, value=_importe(valor))
+    celda.number_format = FORMATO_IMPORTE
+    celda.alignment = ALINEACION_DERECHA
+
+
+def _celda_formula(hoja: Worksheet, fila: int, columna: int, formula: str) -> None:
+    celda = hoja.cell(row=fila, column=columna, value=formula)
+    celda.number_format = FORMATO_IMPORTE
+    celda.alignment = ALINEACION_DERECHA
+
+
+def _escribir_encabezados(hoja: Worksheet, fila: int, columnas: list[str]) -> None:
+    for indice, nombre in enumerate(columnas):
+        celda = hoja.cell(row=fila, column=indice + 1, value=nombre)
+        celda.font = FUENTE_ENCABEZADO
+        celda.fill = RELLENO_ENCABEZADO
+        celda.alignment = ALINEACION_CENTRO
+        celda.border = BORDE_ENCABEZADO
+
+
+def _titulo_seccion(hoja: Worksheet, fila: int, texto: str) -> None:
+    hoja.cell(row=fila, column=1, value=texto).font = FUENTE_TITULO_SECCION
+
+
+def _anchos(hoja: Worksheet, anchos: dict[str, float]) -> None:
+    for columna, ancho in anchos.items():
+        hoja.column_dimensions[columna].width = ancho
+
+
+# ----------------------------------------------------------------------
+# Membrete
+# ----------------------------------------------------------------------
+
+
+def _escribir_membrete(hoja: Worksheet, encabezado: EncabezadoConciliacion) -> None:
+    """Los cuatro campos del membrete de la hoja Libro Mayor.
+
+    La hoja de movimientos los toma por formula contra esta: hay que escribir
+    valores aca y formulas alla.
     """
     hoja["B5"] = encabezado.empresa
     hoja["B6"] = encabezado.banco
@@ -196,305 +294,216 @@ def _escribir_encabezado(hoja: Worksheet, encabezado: EncabezadoConciliacion) ->
     periodo = _periodo_a_fecha(encabezado.periodo)
     if periodo is not None:
         hoja["I5"] = periodo
+        hoja["I5"].number_format = FORMATO_FECHA
+        hoja["I5"].alignment = ALINEACION_CENTRO
     elif encabezado.periodo:
         hoja["I5"] = encabezado.periodo
 
 
-def _estilo_encabezado(celda) -> None:
-    celda.font = FUENTE_ENCABEZADO
-    celda.fill = RELLENO_ENCABEZADO
-    celda.alignment = ALINEACION_CENTRO
+def _restaurar_formulas_del_membrete(hoja: Worksheet) -> None:
+    """Deja los links de la hoja de movimientos apuntando al Libro Mayor."""
+    hoja["B5"] = "=+'Libro Mayor'!B5"
+    hoja["B6"] = "=+'Libro Mayor'!B6"
+    hoja["I5"] = "=+'Libro Mayor'!I5"
+    hoja["I6"] = "=+'Libro Mayor'!I6"
+    # La plantilla traia 'mmm-yy' en esta celda; el membrete de las dos hojas
+    # tiene que verse igual.
+    hoja["I5"].number_format = FORMATO_FECHA
+    hoja["I5"].alignment = ALINEACION_CENTRO
 
 
-def _escribir_fila(
-    hoja: Worksheet,
-    fila: int,
-    columna_base: int,
-    valores: list,
-) -> None:
-    for desplazamiento, valor in enumerate(valores):
-        # No se puede pasar value= al cell(): openpyxl no sabe convertir una
-        # lista. Se escribe la celda vacia y despues el valor.
-        celda = hoja.cell(row=fila, column=columna_base + desplazamiento)
-        celda.value = valor
-        if isinstance(valor, date):
-            celda.number_format = FORMATO_FECHA
-            celda.alignment = ALINEACION_CENTRO
-        elif isinstance(valor, (int, float)) and not isinstance(valor, bool):
-            celda.number_format = FORMATO_IMPORTE
-            celda.alignment = ALINEACION_DERECHA
+# ----------------------------------------------------------------------
+# Tablas de la hoja Libro Mayor
+# ----------------------------------------------------------------------
 
 
-def _escribir_fila_de_totales(hoja: Worksheet, fila: int, columna_base: int, celdas: int) -> None:
-    for desplazamiento in range(celdas):
-        celda = hoja.cell(row=fila, column=columna_base + desplazamiento)
-        celda.font = FUENTE_TOTAL
-        celda.border = BORDE_TOTAL
+def _armar_tabla_mayor(
+    hoja: Worksheet, solicitud: SolicitudExportacion
+) -> tuple[int, str]:
+    """Tabla 1 completa. Devuelve (fila libre, celda del ultimo saldo)."""
+    _escribir_encabezados(hoja, FILA_ENCABEZADO_TABLA1, COLUMNAS_TABLA1)
 
+    fila = FILA_ENCABEZADO_TABLA1 + 1
+    # La fila de Saldo Inicial siempre va, aunque no haya movimientos: es el
+    # punto de partida de la columna F.
+    hoja.cell(row=fila, column=7, value="Saldo Inicial").font = FUENTE_TITULO_SECCION
+    _celda_importe(hoja, fila, 6, solicitud.saldo_inicial_mayor)
+    celda_ultimo_saldo = f"F{fila}"
+    fila += 1
 
-def _importe_de_lado(haber: float, debe: float, lado: str) -> float:
-    """El importe con signo unificado de cada lado.
-
-    Banco:  un DEBE es una salida, asi que el signo va (haber - debe).
-    Mayor:  un DEBE es una entrada, asi que el signo va (debe - haber).
-    """
-    if lado == "xubio":
-        return round(_importe(debe) - _importe(haber), 2)
-    return round(_importe(haber) - _importe(debe), 2)
-
-
-def _importe_de_pendiente(pendiente: PendienteExport, lado: str) -> float:
-    if pendiente.importe is not None:
-        return _importe(pendiente.importe)
-    return _importe_de_lado(_importe(pendiente.haber), _importe(pendiente.debe), lado)
-
-
-def _importe_de_par(par: ParConciliado) -> float:
-    """El importe con signo del par, o el del banco si no vino."""
-    if par.importe is None:
-        return _importe(par.haber) - _importe(par.debe)
-    return _importe(par.importe)
-
-
-def _debito_credito_en(importe: float) -> tuple[float | None, float | None]:
-    """Reparte un importe contable como lo reporta Xubio.
-
-    En el Excel de origen ("Movimientos de CC") la salida va NEGATIVA en
-    "Debito en $" y la entrada va POSITIVA en "Credito en $"; la columna que
-    no corresponde queda vacia, como en el archivo descargado.
-    """
-    if importe < 0:
-        return importe, None
-    if importe > 0:
-        return None, importe
-    return None, None
-
-
-def _filas_partidas_contables(pendientes: list[PendienteExport]) -> list[list]:
-    """Las partidas contables fila por fila, con la firma de Xubio."""
-    filas = []
-    for pendiente in pendientes:
-        debito, credito = _debito_credito_en(_importe_de_pendiente(pendiente, "xubio"))
-        filas.append([_fecha(pendiente.fecha), pendiente.concepto, debito, credito])
-    return filas
-
-
-def _armar_seccion_no_registradas(
-    hoja: Worksheet,
-    seccion: tuple[str, int, int, int],
-    pendientes: list[PendienteExport],
-) -> None:
-    """La seccion "Partidas contables no registradas en banco"."""
-    (titulo_esperado, fila_titulo, fila_encabezado, fila_dato) = seccion
-
-    # El titulo ya viene de la plantilla y es el texto que la auditoria
-    # reconoce. Solo se escribe si el archivo no lo tiene: si alguien
-    # edito la plantilla a mano, el papel sale con su texto, no con el
-    # nuestro pisando encima.
-    celda_titulo = hoja.cell(row=fila_titulo, column=1)
-    if not celda_titulo.value:
-        celda_titulo.value = titulo_esperado
-    celda_titulo.font = FUENTE_TITULO_BLOQUE
-
-    for desplazamiento, titulo in enumerate(COLUMNAS_MAYOR_XUBIO):
-        celda = hoja.cell(row=fila_encabezado, column=1 + desplazamiento, value=titulo)
-        _estilo_encabezado(celda)
-
-    fila = fila_dato
-    for valores in _filas_partidas_contables(pendientes):
-        _escribir_fila(hoja, fila, 1, valores)
+    for movimiento in solicitud.movimientos_mayor:
+        _escribir_fila(
+            hoja,
+            fila,
+            [
+                _fecha(movimiento.fecha),
+                movimiento.comprobante or "",
+                "",
+                _importe(movimiento.debe),
+                _importe(movimiento.haber),
+                None,
+                movimiento.concepto or "",
+                "",
+                "",
+            ],
+            centradas={1, 2},
+        )
+        _celda_formula(hoja, fila, 6, f"=F{fila - 1}+D{fila}-E{fila}")
+        celda_ultimo_saldo = f"F{fila}"
         fila += 1
 
-    if fila > fila_dato:
-        importes = [_importe_de_pendiente(p, "xubio") for p in pendientes]
-        total_debito = round(sum(i for i in importes if i < 0), 2)
-        total_credito = round(sum(i for i in importes if i > 0), 2)
-        hoja.cell(row=fila, column=2, value="Total").alignment = ALINEACION_DERECHA
-        hoja.cell(row=fila, column=3, value=total_debito)
-        hoja.cell(row=fila, column=4, value=total_credito)
-        _escribir_fila_de_totales(hoja, fila, 1, len(COLUMNAS_MAYOR_XUBIO))
-        for desplazamiento in (2, 3):
-            celda = hoja.cell(row=fila, column=1 + desplazamiento)
-            celda.number_format = FORMATO_IMPORTE
-            celda.alignment = ALINEACION_DERECHA
+    return fila, celda_ultimo_saldo
 
 
-def _armar_seccion_pendientes_banco(
-    hoja: Worksheet,
-    seccion: tuple[str, int, int, int],
-    pendientes: list[PendienteExport],
-) -> None:
-    """La seccion "Partidas en banco pendientes de registracion contable"."""
-    (titulo_esperado, fila_titulo, fila_encabezado, fila_dato) = seccion
+def _armar_tabla_pendientes_contables(
+    hoja: Worksheet, fila_inicio: int, pendientes: list[PendienteExport]
+) -> int:
+    """Tabla 2: partidas del mayor que no sono en el extracto."""
+    fila = fila_inicio + 1
+    _titulo_seccion(hoja, fila, TITULO_PARTIDAS_CONTABLES)
+    fila += 1
+    _escribir_encabezados(hoja, fila, COLUMNAS_TABLA2)
+    fila += 1
 
-    celda_titulo = hoja.cell(row=fila_titulo, column=1)
-    if not celda_titulo.value:
-        celda_titulo.value = titulo_esperado
-    celda_titulo.font = FUENTE_TITULO_BLOQUE
-
-    for desplazamiento, titulo in enumerate(COLUMNAS_MAYOR_BANCO):
-        celda = hoja.cell(row=fila_encabezado, column=1 + desplazamiento, value=titulo)
-        _estilo_encabezado(celda)
-
-    fila = fila_dato
+    primer_dato = fila
     for pendiente in pendientes:
         _escribir_fila(
             hoja,
             fila,
-            1,
             [
                 _fecha(pendiente.fecha),
-                pendiente.concepto,
+                pendiente.comprobante or pendiente.referencia or "",
+                "",
                 _importe(pendiente.debe),
                 _importe(pendiente.haber),
-                _importe_de_pendiente(pendiente, "banco"),
+                None,
+                pendiente.concepto or "",
+                "",
             ],
+            centradas={1, 2},
         )
+        formula = f"=D{fila}-E{fila}" if fila == primer_dato else f"=F{fila - 1}+D{fila}-E{fila}"
+        _celda_formula(hoja, fila, 6, formula)
         fila += 1
 
-    if fila > fila_dato:
-        total_debe = sum(_importe(p.debe) for p in pendientes)
-        total_haber = sum(_importe(p.haber) for p in pendientes)
-        hoja.cell(row=fila, column=2, value="Total").alignment = ALINEACION_DERECHA
-        hoja.cell(row=fila, column=3, value=total_debe)
-        hoja.cell(row=fila, column=4, value=total_haber)
-        hoja.cell(row=fila, column=5, value=_importe_de_lado(total_haber, total_debe, "banco"))
-        _escribir_fila_de_totales(hoja, fila, 1, len(COLUMNAS_MAYOR_BANCO))
-        for desplazamiento in (2, 3, 4):
-            celda = hoja.cell(row=fila, column=1 + desplazamiento)
-            celda.number_format = FORMATO_IMPORTE
-            celda.alignment = ALINEACION_DERECHA
+    return fila
 
 
-def _armar_mayor(hoja: Worksheet, solicitud: SolicitudExportacion) -> None:
-    """Las dos secciones del libro mayor: los pendientes, de cada lado."""
-    for columna, ancho in ANCHOS_MAYOR.items():
-        hoja.column_dimensions[columna].width = ancho
+def _armar_tabla_pendientes_banco(
+    hoja: Worksheet, fila_inicio: int, pendientes: list[PendienteExport]
+) -> int:
+    """Tabla 3: movimientos del extracto que no estan contabilizados."""
+    fila = fila_inicio + 1
+    _titulo_seccion(hoja, fila, TITULO_PARTIDAS_BANCO)
+    fila += 1
+    _escribir_encabezados(hoja, fila, COLUMNAS_TABLA3)
+    fila += 1
 
-    # La seccion de partidas contables repite la firma del Excel de Xubio
-    # ("Debito en $" con la salida negativa, "Credito en $" con la entrada
-    # positiva) para que el papel se compare hoja contra hoja contra el
-    # archivo descargado. La seccion del banco conserva Debe/Haber, que es
-    # como lo trae el extracto.
-    _armar_seccion_no_registradas(hoja, SECCIONES_MAYOR[0], solicitud.pendientes_xubio)
-    _armar_seccion_pendientes_banco(hoja, SECCIONES_MAYOR[1], solicitud.pendientes_banco)
+    primer_dato = fila
+    for pendiente in pendientes:
+        _escribir_fila(
+            hoja,
+            fila,
+            [
+                _fecha(pendiente.fecha),
+                pendiente.referencia or "",
+                "",
+                _importe(pendiente.debe),
+                _importe(pendiente.haber),
+                None,
+                pendiente.concepto or "",
+            ],
+            centradas={1, 2},
+        )
+        formula = f"=D{fila}-E{fila}" if fila == primer_dato else f"=F{fila - 1}+D{fila}-E{fila}"
+        _celda_formula(hoja, fila, 6, formula)
+        fila += 1
+
+    return fila
 
 
-def _armar_bloque(
+def _armar_pie_de_control(
     hoja: Worksheet,
-    columna_base: int,
-    titulo: str,
-    filas: list[list],
+    fila_inicio: int,
+    solicitud: SolicitudExportacion,
+    celda_saldo_mayor: str,
 ) -> None:
-    for posicion, ancho in enumerate(ANCHOS_POR_POSICION):
-        hoja.column_dimensions[_columna(columna_base, posicion)].width = ancho
+    """Saldo final del mayor, saldo final del banco y el control de cierre.
 
-    celda_titulo = hoja.cell(row=FILA_TITULO_MOVIMIENTOS, column=columna_base, value=titulo)
-    celda_titulo.font = FUENTE_TITULO_BLOQUE
+    La formula del control es `=F(penultima)-F(anteultima)`, tal como la pide
+    el formulario: diferencia entre el saldo que informa el banco y el saldo
+    contable. Cero es el cierre.
+    """
+    fila = fila_inicio + 1
+    _titulo_seccion(hoja, fila, "Saldo final según Mayor")
+    _celda_formula(hoja, fila, 6, f"={celda_saldo_mayor}")
+    fila_saldo_mayor = fila
+    fila += 1
 
-    for desplazamiento, nombre in enumerate(COLUMNAS_MOVIMIENTOS):
-        celda = hoja.cell(
-            row=FILA_ENCABEZADO_MOVIMIENTOS, column=columna_base + desplazamiento, value=nombre
+    _titulo_seccion(hoja, fila, "Saldo final según Banco")
+    _celda_importe(hoja, fila, 6, _saldo_final_banco(solicitud))
+    fila_saldo_banco = fila
+    fila += 1
+
+    _titulo_seccion(hoja, fila, "Control de diferencia")
+    _celda_formula(hoja, fila, 6, f"=F{fila_saldo_banco}-F{fila_saldo_mayor}")
+
+
+# ----------------------------------------------------------------------
+# Hoja Movimientos Bancarios
+# ----------------------------------------------------------------------
+
+
+def _armar_movimientos(
+    hoja: Worksheet, solicitud: SolicitudExportacion, celda_saldo_mayor: str
+) -> None:
+    _escribir_encabezados(hoja, FILA_ENCABEZADO_MOVIMIENTOS, COLUMNAS_MOVIMIENTOS)
+
+    fila = FILA_ENCABEZADO_MOVIMIENTOS + 1
+    primer_dato = fila
+    for movimiento in solicitud.movimientos_banco:
+        _escribir_fila(
+            hoja,
+            fila,
+            [
+                _fecha(movimiento.fecha),
+                "",
+                movimiento.concepto or "",
+                _importe(movimiento.debe),
+                _importe(movimiento.haber),
+                None,
+                "",
+                "",
+                "",
+                "",
+                solicitud.encabezado.banco,
+                "",
+                "",
+                movimiento.referencia or "",
+                "",
+                "",
+                "",
+            ],
+            # Los codigos van centrados (col. B, H, J, K, M, P, Q) aunque hoy
+            # salgan vacios: el spec pide centrar fechas y codigos.
+            centradas={1, 7, 9, 10, 12, 15, 16},
         )
-        _estilo_encabezado(celda)
-
-    fila = FILA_PRIMER_DATO_MOVIMIENTOS
-    for valores in filas:
-        _escribir_fila(hoja, fila, columna_base, valores)
+        # El banco acumula credito - debito; la primera fila arranca en cero.
+        if fila == primer_dato:
+            formula = f"=E{fila}-D{fila}"
+        else:
+            formula = f"=F{fila - 1}+E{fila}-D{fila}"
+        _celda_formula(hoja, fila, 6, formula)
         fila += 1
 
-    if fila > FILA_PRIMER_DATO_MOVIMIENTOS:
-        total_debe = sum(_importe(v[2]) for v in filas)
-        total_haber = sum(_importe(v[3]) for v in filas)
-        hoja.cell(row=fila, column=columna_base + 1, value="Total").alignment = ALINEACION_DERECHA
-        # El Importe se totaliza igual que Debe y Haber para que el bloque
-        # cuadre contra el Libro Mayor, que si lo suma. El Saldo no se suma:
-        # es un saldo acumulado, no una magnitud aditiva.
-        for desplazamiento, valor in (
-            (2, total_debe),
-            (3, total_haber),
-            (4, sum(_importe(v[4]) for v in filas)),
-        ):
-            hoja.cell(row=fila, column=columna_base + desplazamiento, value=valor)
-        _escribir_fila_de_totales(
-            hoja, fila, columna_base, len(COLUMNAS_MOVIMIENTOS)
-        )
-        for desplazamiento in (2, 3, 4, 5):
-            hoja.cell(row=fila, column=columna_base + desplazamiento).number_format = FORMATO_IMPORTE
-            hoja.cell(row=fila, column=columna_base + desplazamiento).alignment = ALINEACION_DERECHA
+    if fila > primer_dato:
+        _titulo_seccion(hoja, fila, "Control de diferencia")
+        _celda_formula(hoja, fila, 6, f"=F{fila - 1}-'Libro Mayor'!{celda_saldo_mayor}")
 
 
-def _filas_de_banco(pendientes: list[PendienteExport]) -> list[list]:
-    filas = []
-    for pendiente in pendientes:
-        filas.append(
-            [
-                _fecha(pendiente.fecha),
-                pendiente.concepto,
-                _importe(pendiente.debe),
-                _importe(pendiente.haber),
-                _importe_de_pendiente(pendiente, "banco"),
-                _importe(pendiente.saldo),
-                _etiqueta_categoria(pendiente.categoria),
-                "Banco",
-            ]
-        )
-    return filas
-
-
-def _filas_de_mayor(pendientes: list[PendienteExport]) -> list[list]:
-    filas = []
-    for pendiente in pendientes:
-        filas.append(
-            [
-                _fecha(pendiente.fecha),
-                pendiente.concepto,
-                _importe(pendiente.debe),
-                _importe(pendiente.haber),
-                _importe_de_pendiente(pendiente, "xubio"),
-                "",
-                "",
-                "Libro Mayor",
-            ]
-        )
-    return filas
-
-
-def _filas_de_conciliados(pares: list[ParConciliado]) -> list[list]:
-    filas = []
-    for par in pares:
-        if par.manual:
-            origen = "A mano"
-            if par.diferencia is not None and _importe(par.diferencia) != 0:
-                origen = f"A mano (dif. {par.diferencia:.2f})"
-        else:
-            origen = "Automático"
-        filas.append(
-            [
-                _fecha(par.fecha),
-                f"{par.concepto_banco} / {par.concepto_xubio}",
-                _importe(par.debe),
-                _importe(par.haber),
-                _importe_de_par(par),
-                _importe(par.saldo),
-                _etiqueta_categoria(par.categoria),
-                origen,
-            ]
-        )
-    return filas
-
-
-def _armar_movimientos(hoja: Worksheet, solicitud: SolicitudExportacion) -> None:
-    # Un constructor de filas por bloque, en el mismo orden que
-    # BLOQUES_MOVIMIENTOS: banco, libro mayor y conciliados.
-    filas_por_bloque = [
-        _filas_de_banco(solicitud.pendientes_banco),
-        _filas_de_mayor(solicitud.pendientes_xubio),
-        _filas_de_conciliados(solicitud.conciliados),
-    ]
-
-    for (columna_base, titulo), filas in zip(BLOQUES_MOVIMIENTOS, filas_por_bloque):
-        _armar_bloque(hoja, columna_base, titulo, filas)
+# ----------------------------------------------------------------------
+# Punto de entrada
+# ----------------------------------------------------------------------
 
 
 def exportar(solicitud: SolicitudExportacion) -> bytes:
@@ -508,13 +517,16 @@ def exportar(solicitud: SolicitudExportacion) -> bytes:
         mayor = libro[HOJA_MAYOR]
         movimientos = libro[HOJA_MOVIMIENTOS]
 
-        _escribir_encabezado(mayor, solicitud.encabezado)
-        _armar_mayor(mayor, solicitud)
-        _armar_movimientos(movimientos, solicitud)
+        _anchos(mayor, ANCHOS_MAYOR)
+        _anchos(movimientos, ANCHOS_MOVIMIENTOS)
+        _escribir_membrete(mayor, solicitud.encabezado)
 
-        # La hoja de movimientos toma el membrete por formula contra Libro
-        # Mayor. Si en una sesion anterior quedo con un valor pegado, la
-        # formula se perdio y esta hoja dejaria de seguir al membrete.
+        fila, celda_saldo_mayor = _armar_tabla_mayor(mayor, solicitud)
+        fila = _armar_tabla_pendientes_contables(mayor, fila, solicitud.pendientes_xubio)
+        fila = _armar_tabla_pendientes_banco(mayor, fila, solicitud.pendientes_banco)
+        _armar_pie_de_control(mayor, fila, solicitud, celda_saldo_mayor)
+
+        _armar_movimientos(movimientos, solicitud, celda_saldo_mayor)
         _restaurar_formulas_del_membrete(movimientos)
 
         destino = io.BytesIO()
@@ -522,14 +534,6 @@ def exportar(solicitud: SolicitudExportacion) -> bytes:
         return destino.getvalue()
     finally:
         libro.close()
-
-
-def _restaurar_formulas_del_membrete(hoja: Worksheet) -> None:
-    """Deja los links de la hoja de movimientos apuntando al Libro Mayor."""
-    hoja["B5"] = "=+'Libro Mayor'!B5"
-    hoja["B6"] = "=+'Libro Mayor'!B6"
-    hoja["I5"] = "=+'Libro Mayor'!I5"
-    hoja["I6"] = "=+'Libro Mayor'!I6"
 
 
 def nombre_archivo(solicitud: SolicitudExportacion, hoy: date | None = None) -> str:

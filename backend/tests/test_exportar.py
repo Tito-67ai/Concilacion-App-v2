@@ -16,6 +16,11 @@ from app.main import app
 client = TestClient(app)
 
 
+def _valores(hoja) -> list:
+    """Todos los valores de la hoja, para no atarse a una fila exacta."""
+    return [celda.value for fila in hoja.iter_rows() for celda in fila]
+
+
 def _payload(**cambios):
     base = {
         "encabezado": {
@@ -55,7 +60,7 @@ def test_devuelve_un_xlsx_que_se_puede_abrir():
 
     libro = openpyxl.load_workbook(io.BytesIO(respuesta.content))
     assert libro["Libro Mayor"]["B5"].value == "ACME S.A."
-    assert libro["Libro Mayor"]["B20"].value == "COMISION"
+    assert "COMISION" in _valores(libro["Libro Mayor"])
 
 
 def test_manda_el_nombre_del_archivo_para_que_el_navegador_lo_baje():
@@ -128,7 +133,7 @@ def test_una_fecha_en_formato_argentino_se_acepta():
 
     assert respuesta.status_code == 200
     libro = openpyxl.load_workbook(io.BytesIO(respuesta.content))
-    assert libro["Libro Mayor"]["B20"].value == "COMISION"
+    assert "COMISION" in _valores(libro["Libro Mayor"])
 
 
 def test_el_ruta_esta_registrada_en_el_documento():

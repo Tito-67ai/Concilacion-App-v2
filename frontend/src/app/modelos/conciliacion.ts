@@ -121,6 +121,13 @@ export interface SolicitudExportacion {
   conciliados: ParConciliado[];
   pendientes_banco: MovimientoBanco[];
   pendientes_xubio: MovimientoMayor[];
+  /**
+   * El mayor y el extracto completos, para armar la Tabla 1 y la pestana de
+   * "Movimientos Bancarios" del papel de trabajo. Las bandejas de arriba solo
+   * traen lo que quedo sin cruzar: el spec pide volcar TODO, conciliado o no.
+   */
+  movimientos_mayor: MovimientoMayor[];
+  movimientos_banco: MovimientoBanco[];
   encabezado: EncabezadoConciliacion;
 }
 

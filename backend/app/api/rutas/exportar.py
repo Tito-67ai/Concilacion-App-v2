@@ -28,6 +28,8 @@ async def exportar_conciliacion(solicitud: SolicitudExportacion):
         len(solicitud.conciliados)
         + len(solicitud.pendientes_banco)
         + len(solicitud.pendientes_xubio)
+        + len(solicitud.movimientos_mayor)
+        + len(solicitud.movimientos_banco)
     )
     if total == 0:
         raise HTTPException(

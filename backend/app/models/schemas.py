@@ -148,13 +148,15 @@ class PendienteExport(BaseModel):
     """Una fila sin cruzar, de cualquiera de los dos lados.
 
     'origen' distingue la bandeja: los pendientes del banco traen saldo y
-    categoria, los de Xubio no.
+    categoria, los de Xubio no. 'comprobante' es el numero de documento del
+    mayor (FCA-0001-00000001): la Tabla 2 del papel lo escribe en "Documento".
     """
 
     origen: str = "banco"
     fecha: Optional[date] = None
     concepto: str = ""
     referencia: Optional[str] = None
+    comprobante: Optional[str] = None
     debe: float = 0.0
     haber: float = 0.0
     saldo: float = 0.0
@@ -164,10 +166,54 @@ class PendienteExport(BaseModel):
     _fecha = field_validator("fecha", mode="before")(_normalizar_fecha)
 
 
+class MovimientoMayorExport(BaseModel):
+    """Una fila del Libro Mayor para la Tabla 1 del papel de trabajo.
+
+    Solo los campos que la estructura del formulario pide por nombre. El
+    resto de columnas del spec (Cuenta, Organizacion, Centro de Costos) van
+    vacias porque el pipeline todavia no las captura.
+    """
+
+    fecha: Optional[date] = None
+    concepto: str = ""
+    comprobante: Optional[str] = None
+    debe: float = 0.0
+    haber: float = 0.0
+
+    _fecha = field_validator("fecha", mode="before")(_normalizar_fecha)
+
+
+class MovimientoBancoExport(BaseModel):
+    """Una fila del extracto para la pestana "Movimientos Bancarios".
+
+    El spec pide 17 columnas de extracto; hoy solo hay dato para fecha,
+    concepto, debito, credito, saldo, referencia y banco.
+    """
+
+    fecha: Optional[date] = None
+    concepto: str = ""
+    referencia: Optional[str] = None
+    debe: float = 0.0
+    haber: float = 0.0
+    saldo: float = 0.0
+
+    _fecha = field_validator("fecha", mode="before")(_normalizar_fecha)
+
+
 class SolicitudExportacion(BaseModel):
     conciliados: list[ParConciliado] = Field(default_factory=list)
     pendientes_banco: list[PendienteExport] = Field(default_factory=list)
     pendientes_xubio: list[PendienteExport] = Field(default_factory=list)
+    # Tabla 1 (todos los movimientos del mayor) y la pestana del extracto
+    # completo. El cruce no las manda; vienen del estado de la pantalla.
+    movimientos_mayor: list[MovimientoMayorExport] = Field(default_factory=list)
+    movimientos_banco: list[MovimientoBancoExport] = Field(default_factory=list)
+    # Saldo de apertura del mayor para la fila "Saldo Inicial" de la Tabla 1.
+    # El extracto arranca su acumulado en cero (formula del spec).
+    saldo_inicial_mayor: float = 0.0
+    # Saldo final que informa el banco, para el pie de control. Si no llega, se
+    # usa el saldo del ultimo movimiento del extracto.
+    saldo_final_banco: Optional[float] = None
     encabezado: EncabezadoConciliacion = Field(default_factory=EncabezadoConciliacion)
 
 

@@ -28,6 +28,8 @@ function solicitud(extra: Partial<SolicitudExportacion> = {}): SolicitudExportac
     ],
     pendientes_banco: [],
     pendientes_xubio: [],
+    movimientos_mayor: [],
+    movimientos_banco: [],
     encabezado: {
       empresa: 'ACME S.A.',
       banco: 'SANT',

@@ -29,6 +29,10 @@ yarn-error.log
 !.vscode/mcp.json
 .history/*
 
+# Logs de "ng serve" locales
+/serve.out.log
+/serve.err.log
+
 # Miscellaneous
 /.angular/cache
 .sass-cache/

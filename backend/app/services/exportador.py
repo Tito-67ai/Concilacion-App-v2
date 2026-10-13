@@ -10,7 +10,10 @@ Estructura (hoja "Libro Mayor"):
     ...         Tabla 2 "Partidas contables no registradas en banco." (mayor que
                 no sono en el extracto).
     ...         Tabla 3 "Partidas en banco pendientes de registracion contable."
-                (extracto que no esta en el mayor).
+                (los debitos automaticos del extracto que no estan en el mayor:
+                comisiones, IVA, impuestos, percepciones, intereses, sellados).
+                Los importes van en la columna Haber y cierran con una fila de
+                totalizacion.
     ...         Pie: saldo ajustado, saldo según extracto y el control de
                 diferencia `=F(ajustado)-F(extracto)`.
 
@@ -45,6 +48,7 @@ from app.models.schemas import (
     PendienteExport,
     SolicitudExportacion,
 )
+from app.services.clasificacion import es_gasto_bancario
 
 DIRECTORIO_PLANTILLAS = Path(__file__).resolve().parent.parent / "assets" / "plantillas"
 NOMBRE_PLANTILLA = "FO 02-03 Conciliación Bancaria.xlsx"
@@ -465,32 +469,50 @@ def _armar_tabla_pendientes_contables(
 def _armar_tabla_pendientes_banco(
     hoja: Worksheet, fila_inicio: int, pendientes: list[PendienteExport]
 ) -> int:
-    """Tabla 3: movimientos del extracto que no estan contabilizados."""
+    """Seccion 3: debitos automaticos del extracto sin registrar en el mayor.
+
+    Solo van los gastos y cargos del banco (comisiones, IVA, impuestos,
+    percepciones, intereses, sellados): lo que el spec llama "partidas de debito
+    automatico". Un pago operativo pendiente no entra: para eso esta el detalle
+    completo del extracto en la otra hoja.
+
+    El importe va en la columna Haber (E) porque son cargos que bajan el saldo,
+    y el cuadro cierra con una fila de totalizacion sobre esa misma columna.
+    """
     fila = fila_inicio + 1
     _titulo_seccion(hoja, fila, TITULO_PARTIDAS_BANCO)
     fila += 1
     _escribir_encabezados(hoja, fila, COLUMNAS_TABLA3)
     fila += 1
 
+    gastos = [p for p in pendientes if es_gasto_bancario(p.concepto)]
+    if not gastos:
+        return fila
+
     primer_dato = fila
-    for pendiente in pendientes:
+    for gasto in gastos:
+        importe = _importe(gasto.debe) or _importe(gasto.haber)
         _escribir_fila(
             hoja,
             fila,
             [
-                _fecha(pendiente.fecha),
-                pendiente.referencia or "",
+                _fecha(gasto.fecha),
+                gasto.referencia or gasto.comprobante or "",
                 "",
-                _importe(pendiente.debe),
-                _importe(pendiente.haber),
                 None,
-                pendiente.concepto or "",
+                importe,
+                None,
+                gasto.concepto or "",
             ],
             centradas={1, 2},
         )
-        formula = f"=D{fila}-E{fila}" if fila == primer_dato else f"=F{fila - 1}+D{fila}-E{fila}"
-        _celda_formula(hoja, fila, 6, formula)
+        _celda_formula(hoja, fila, 6, f"=F{fila - 1}+D{fila}-E{fila}")
         fila += 1
+
+    ultimo_dato = fila - 1
+    _titulo_seccion(hoja, fila, "Total gastos e impuestos pendientes")
+    _celda_formula(hoja, fila, 5, f"=SUM(E{primer_dato}:E{ultimo_dato})")
+    fila += 1
 
     return fila
 
@@ -580,10 +602,11 @@ def _armar_movimientos(
         _celda_formula(hoja, fila, 6, formula)
         debe = _importe(movimiento.debe)
         haber = _importe(movimiento.haber)
-        if es_pendiente:
-            # Los debitos del banco pendientes de registracion van en verde.
+        if es_pendiente and es_gasto_bancario(movimiento.concepto):
+            # Es uno de los debitos automaticos de la Seccion 3 del Libro Mayor:
+            # su celda de origen va en verde claro.
             _pintar_importe(hoja, fila, debe, 0.0, RELLENO_PENDIENTE_BANCO)
-        elif debe or haber:
+        elif not es_pendiente and (debe or haber):
             # Cruzo contra el mayor: el importe va en amarillo.
             _pintar_importe(hoja, fila, debe, haber, RELLENO_CONCILIADO)
         fila += 1

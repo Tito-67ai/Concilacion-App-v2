@@ -228,11 +228,41 @@ def test_la_tabla3_va_despues_de_la_tabla2():
     leidas = [hoja.cell(row=18, column=i + 1).value for i in range(len(esperadas))]
     assert leidas == esperadas
 
+    # El cargo del banco va en la columna Haber: es un debito que baja el saldo.
     assert _celda(hoja, "A19") == date(2026, 7, 5)
     assert hoja["B19"].value == "OP-9"
-    assert hoja["D19"].value == 150
+    assert hoja["D19"].value in (None, 0)
+    assert hoja["E19"].value == 150
     assert hoja["G19"].value == "COMISION"
-    assert hoja["F19"].value == "=D19-E19"
+    assert hoja["F19"].value == "=F18+D19-E19"
+
+
+def test_la_tabla3_totaliza_los_gastos_pendientes():
+    hoja = _mayor(exportador.exportar(_solicitud()))
+
+    # La fila de total suma la columna Haber del cuadro.
+    assert hoja["A20"].value == "Total gastos e impuestos pendientes"
+    assert hoja["E20"].value == "=SUM(E19:E19)"
+
+
+def test_la_tabla3_deja_afuera_los_pagos_operativos_pendientes():
+    hoja = _mayor(
+        exportador.exportar(
+            _solicitud(
+                pendientes_banco=[
+                    {"origen": "banco", "fecha": "2026-07-05", "concepto": "COMISION", "referencia": "OP-9", "debe": 150},
+                    {"origen": "banco", "fecha": "2026-07-06", "concepto": "PAGO PROVEEDOR", "referencia": "OP-10", "debe": 500},
+                ]
+            )
+        )
+    )
+
+    # Solo la comision entra al cuadro; el pago queda afuera y el total lo ignora.
+    assert hoja["G19"].value == "COMISION"
+    assert hoja["E19"].value == 150
+    assert hoja["G20"].value != "PAGO PROVEEDOR"
+    assert hoja["A20"].value == "Total gastos e impuestos pendientes"
+    assert hoja["E20"].value == "=SUM(E19:E19)"
 
 
 # ----------------------------------------------------------------------
@@ -243,12 +273,12 @@ def test_la_tabla3_va_despues_de_la_tabla2():
 def test_el_pie_compara_el_saldo_ajustado_con_el_del_extracto():
     hoja = _mayor(exportador.exportar(_solicitud()))
 
-    assert hoja["A21"].value == "Saldo Ajustado"
-    assert hoja["F21"].value == "=F11"  # ultimo saldo de la Tabla 1
-    assert hoja["A22"].value == "Saldo según Extracto"
-    assert hoja["F22"].value == 850
-    assert hoja["A23"].value == "Control de diferencia"
-    assert hoja["F23"].value == "=F21-F22"
+    assert hoja["A22"].value == "Saldo Ajustado"
+    assert hoja["F22"].value == "=F11"  # ultimo saldo de la Tabla 1
+    assert hoja["A23"].value == "Saldo según Extracto"
+    assert hoja["F23"].value == 850
+    assert hoja["A24"].value == "Control de diferencia"
+    assert hoja["F24"].value == "=F22-F23"
 
 
 # ----------------------------------------------------------------------
@@ -390,6 +420,25 @@ def test_la_hoja_de_movimientos_pinta_conciliados_y_pendientes():
     assert hoja["E10"].fill.patternType is None
 
 
+def test_la_hoja_de_movimientos_no_pinta_un_pendiente_que_no_es_gasto():
+    hoja = _movimientos(
+        exportador.exportar(
+            _solicitud(
+                pendientes_banco=[
+                    {"origen": "banco", "fecha": "2026-07-06", "concepto": "PAGO PROVEEDOR", "debe": 500}
+                ],
+                movimientos_banco=[
+                    {"fecha": "2026-07-02", "concepto": "COBRO", "haber": 1000, "saldo": 1000},
+                    {"fecha": "2026-07-06", "concepto": "PAGO PROVEEDOR", "debe": 500, "saldo": 500},
+                ],
+            )
+        )
+    )
+
+    # Un pago pendiente no es un gasto del banco: no lleva el verde de la Seccion 3.
+    assert hoja["D10"].fill.patternType is None
+
+
 def test_las_columnas_de_importe_entran_los_numeros_y_no_quedan_en_piquitos():
     # Con el ancho viejo (14) un importe como 99.999.999.999,99 no entraba y
     # Excel lo tapaba con "#######". Se pide un piso de ancho y, ademas, que
@@ -476,13 +525,13 @@ def test_un_importe_que_viene_nan_no_rompe_el_archivo():
     # de JavaScript lo acepta), asi que el exportador lo tiene que tolerar.
     solicitud = _solicitud(
         pendientes_banco=[
-            {"fecha": "2026-07-03", "concepto": "X", "debe": float("nan")}
+            {"fecha": "2026-07-03", "concepto": "COMISION", "debe": float("nan")}
         ]
     )
     hoja = _mayor(exportador.exportar(solicitud))
 
-    assert hoja["D19"].value == 0
-    assert hoja["F19"].value == "=D19-E19"
+    assert hoja["E19"].value == 0
+    assert hoja["F19"].value == "=F18+D19-E19"
 
 
 # ----------------------------------------------------------------------

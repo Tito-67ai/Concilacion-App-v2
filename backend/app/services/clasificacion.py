@@ -105,6 +105,48 @@ def es_no_operativa(categoria: str) -> bool:
     return categoria in NO_OPERATIVAS
 
 
+# Gastos y cargos propios del banco (lo que el extracto debita sin que la
+# empresa haya emitido una operacion): comisiones, mantenimiento, intereses,
+# IVA, impuestos y sellados. Es lo que el spec del FO 02-03 llama "partidas de
+# debito automatico" y lo que va a la Seccion 3 del Libro Mayor.
+#
+# La funcion que sigue reusa la clasificacion de percepciones e impuestos. Este
+# patron cubre lo que ese clasificador no ve:
+#   - comisiones e intereses, que quedan como operativos porque no son ni una
+#     retencion ni un impuesto;
+#   - el IVA suelto ("I V A", "IVA REDUCIDA"), que RE_IMPUESTO no mira;
+#   - "IMP S/DEB CT" y "IMP S/CRED CT", la forma abreviada que manda el
+#     extracto real (RE_IMPUESTO pide "DEBITOS"/"CRED" completos);
+#   - "IMPUESTO LEY 25413", el impuesto a los debitos bancarios.
+#
+# "ING BRUTOS" suelta no se agrega a proposito: los conceptos reales traen
+# "PERCEP" y el patron suelto marcaria un traspaso a una empresa como gasto.
+RE_GASTO_BANCARIO = re.compile(
+    r"\bCOM\b"  # COM GEST CLICK, COM MANT CT, COM MPAY, COM B@C
+    r"|COMISION"
+    r"|MANTENIMIENTO"
+    r"|DEB\s*LIQ\s*INTER"  # intereses por liquidacion
+    r"|INTERES"
+    r"|\bIVA\b"  # IVA REDUCIDA
+    r"|I\s*V\s*A\b"  # la variante espaciada "I V A"
+    r"|IMPUESTO"  # IMPUESTO AL VALOR AGREGADO, IMPUESTO LEY 25413
+    r"|IMP\s*S\s*/\s*(?:DEB|CRED)"  # IMP S/DEB CT, IMP S/CRED CT
+    r"|SELLAD"  # SELLADO, SELLADOS
+)
+
+
+def es_gasto_bancario(concepto: str) -> bool:
+    """True si el concepto es un gasto/cargo del banco (debito automatico).
+
+    Reusa la clasificacion de percepciones e impuestos y le suma las comisiones,
+    los intereses y el IVA suelto, que el clasificador de tres categorias deja
+    como operativos porque no son ni una retencion ni un impuesto tipico.
+    """
+    if clasificar(concepto) in NO_OPERATIVAS:
+        return True
+    return bool(RE_GASTO_BANCARIO.search(_normalizar(concepto)))
+
+
 def resumir_categorias(rows) -> dict:
     """Cuenta movimientos por categoria. Para el resumen de la respuesta."""
     conteo = {OPERATIVO: 0, PERCEPCION: 0, IMPUESTO: 0}

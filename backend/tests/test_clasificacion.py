@@ -5,6 +5,7 @@ from app.services.clasificacion import (
     OPERATIVO,
     PERCEPCION,
     clasificar,
+    es_gasto_bancario,
     es_no_operativa,
     resumir_categorias,
 )
@@ -88,6 +89,55 @@ def test_es_no_operativa_distingue_las_dos_categorias():
     assert es_no_operativa(PERCEPCION)
     assert es_no_operativa(IMPUESTO)
     assert not es_no_operativa(OPERATIVO)
+
+
+# Gastos y cargos del banco (debitos automaticos que van a la Seccion 3 del
+# FO 02-03): comisiones, mantenimiento, intereses, IVA, impuestos y
+# percepciones. Conceptos tomados del extracto real de ICBC.
+GASTOS_BANCARIOS = [
+    "COM GEST CLICK",
+    "COM MANT CT",
+    "COM MPAY TRF ABIERTA INTER",
+    "COMISION MANTENIMIENTO",
+    "MANTENIMIENTO DE CUENTA",
+    "DEB LIQ INTER",
+    "PERCEPCION IVA RG",
+    "IMP S/DEBITOS EN CTA CTE",
+    "IMP S/DEB CT",
+    "IMP S/CRED CT",
+    "IMPUESTO AL VALOR AGREGADO",
+    "IMPUESTO LEY 25413",
+    "SELLADO",
+    "ING BRUTOS PERCEP. BUENOS",
+    "R/RECAUDACION IB SIRCREB C",
+    # IVA suelto: no cae en el clasificador de tres categorias.
+    "I V A",
+    "IVA REDUCIDA",
+]
+
+# Movimientos del extracto que NO son un gasto del banco: pagos, cobros,
+# traspasos, rescates de FCI y debitos inmediatos a tarjeta.
+NO_GASTOS_BANCARIOS = [
+    "DEBITO TRANSF CONNECTION B",
+    "DEBITO INMEDIATO 232429148",
+    "TR.9999999 A 0501/0103874",
+    "TRASPASO A ING BRUTOS SRL",
+    "PAGO PROVEEDOR",
+    "COBRO FACTURA 001-00012345",
+    "CRED RESC FCI 020A999999999",
+    "DEB SUSCR FCI",
+    "DEPOS. ECHEQ. NRO. : 99999",
+]
+
+
+@pytest.mark.parametrize("concepto", GASTOS_BANCARIOS)
+def test_los_gastos_del_banco_se_reconocen(concepto):
+    assert es_gasto_bancario(concepto)
+
+
+@pytest.mark.parametrize("concepto", NO_GASTOS_BANCARIOS)
+def test_las_operaciones_no_son_gastos_del_banco(concepto):
+    assert not es_gasto_bancario(concepto)
 
 
 def test_resumir_categorias_cuenta_y_no_rompe_si_falta_el_campo():

@@ -22,7 +22,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from app.services.importador_mayor import leer_mayor
+from app.services.importador_mayor import leer_mayor, leer_mayor_desde_json
 from app.services.procesador_central import ErrorDeExtraccion
 
 # --------------------------------------------------------------------------
@@ -465,3 +465,54 @@ def test_con_cruce_sin_extracto_no_se_pasa_de_largo(client):
 
     assert r.status_code == 400
     assert "extracto" in r.json()["detail"]
+
+
+# --------------------------------------------------------------------------
+# Libro Mayor por la via web de Xubio (la grilla del webreport como JSON)
+# --------------------------------------------------------------------------
+
+
+def test_lee_el_json_del_webreport_con_las_claves_p_():
+    """El webreport contesta la grilla como JSON con las columnas del reporte
+    (p_Fecha, p_...). Se reusa el mismo traductor de encabezados que el
+    archivo: lo unico propio es sacar el prefijo 'p_' antes de traducir."""
+    datos = {
+        "data": [
+            {"p_Fecha": "2026-07-01", "descripcion": "Pago a proveedor", "debe": 0.0, "haber": 1000.0},
+            {"p_Fecha": "2026-07-02", "descripcion": "Ingreso por alquiler", "debe": 500.0, "haber": 0.0},
+        ],
+        "total": 2,
+    }
+
+    lectura = leer_mayor_desde_json(datos)
+
+    assert lectura.convencion == "contable"
+    assert [m["concepto"] for m in lectura.datos] == ["Pago a proveedor", "Ingreso por alquiler"]
+    assert [m["fecha"].isoformat() for m in lectura.datos] == ["2026-07-01", "2026-07-02"]
+    assert (lectura.datos[1]["debe"], lectura.datos[1]["haber"]) == (500.0, 0.0)
+
+
+def test_lee_el_json_cuando_viene_la_lista_sola():
+    """La grilla puede llegar como lista de primer nivel y con los nombres ya
+    en castellano: no hay que atarse a una sola forma."""
+    lectura = leer_mayor_desde_json(
+        [{"Fecha": "2026-07-01", "Descripcion": "Cobro", "Debe": 900.0, "Haber": 0.0}]
+    )
+
+    assert len(lectura.datos) == 1
+    assert lectura.datos[0]["debe"] == 900.0
+    assert lectura.datos[0]["concepto"] == "Cobro"
+
+
+def test_un_json_sin_columnas_conocidas_dice_que_columnas_habia():
+    """Sin columnas de fecha/importe no se inventa nada: el error nombra las
+    claves que trajo la grilla, que es lo unico para corregir el mapeo."""
+    with pytest.raises(ErrorDeExtraccion) as excim:
+        leer_mayor_desde_json({"data": [{"color": "rojo", "medida": 3}]})
+
+    assert "color" in str(excim.value)
+
+
+def test_un_json_sin_filas_lo_dice():
+    with pytest.raises(ErrorDeExtraccion):
+        leer_mayor_desde_json({"data": []})

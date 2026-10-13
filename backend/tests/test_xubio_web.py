@@ -409,6 +409,58 @@ def test_libro_mayor_baja_por_la_sesion_web(monkeypatch):
     assert captura["authorization"] == "Bearer 309-token-de-prueba"
 
 
+def test_libro_mayor_parsea_la_grilla_a_movimientos(monkeypatch):
+    """El frontend necesita los movimientos, no el JSON crudo: el endpoint
+    parsea la grilla con el mismo traductor que la via archivo, y el crudo
+    sigue viajando debajo para diagnostico."""
+    import app.api.rutas.xubio as rutas_xubio
+
+    monkeypatch.setattr(config.settings, "XUBIO_WEB_COOKIE", "")
+    monkeypatch.setattr(config.settings, "XUBIO_WEB_TOKEN", "309-token-de-prueba")
+    monkeypatch.setattr(config.settings, "XUBIO_WEB_EMPRESA_REPORT_CODE", "29774")
+    monkeypatch.setattr(
+        rutas_xubio, "cliente_web", XubioWebClient(transport=_transport_mayor({}))
+    )
+
+    respuesta = cliente_test.get(
+        "/api/xubio/libro-mayor?desde=2026-07-01&hasta=2026-07-31"
+    )
+
+    assert respuesta.status_code == 200
+    cuerpo = respuesta.json()
+    assert cuerpo["cantidad"] == 2
+    assert cuerpo["convencion"] == "contable"
+    assert cuerpo["movimientos"][0]["fecha"] == "2026-07-01"
+    assert cuerpo["movimientos"][0]["concepto"] == "Pago a proveedor"
+    assert cuerpo["movimientos"][1]["debe"] == 500.0
+    assert cuerpo["datos"] == MAYOR_JSON
+
+
+def test_libro_mayor_con_grilla_desconocida_responde_502(monkeypatch):
+    """Si la grilla real no trae las columnas conocidas, el endpoint lo dice en
+    vez de devolver una bandeja vacia: el mensaje lista las columnas que si
+    vinieron, que es lo unico para corregir el mapeo."""
+    import app.api.rutas.xubio as rutas_xubio
+
+    monkeypatch.setattr(config.settings, "XUBIO_WEB_COOKIE", "")
+    monkeypatch.setattr(config.settings, "XUBIO_WEB_TOKEN", "309-token-de-prueba")
+    monkeypatch.setattr(config.settings, "XUBIO_WEB_EMPRESA_REPORT_CODE", "29774")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": [{"columna_rara": "x"}]})
+
+    monkeypatch.setattr(
+        rutas_xubio, "cliente_web", XubioWebClient(transport=httpx.MockTransport(handler))
+    )
+
+    respuesta = cliente_test.get(
+        "/api/xubio/libro-mayor?desde=2026-07-01&hasta=2026-07-31"
+    )
+
+    assert respuesta.status_code == 502
+    assert "columna_rara" in respuesta.json()["detail"]
+
+
 def test_afiliados_toleran_campos_nulos_como_la_web_real(monkeypatch):
     # En vivo la web manda telefono: null (no "" solo) en varios registros y
     # email/localidad/provincia nulos en casi todos: el schema tiene que

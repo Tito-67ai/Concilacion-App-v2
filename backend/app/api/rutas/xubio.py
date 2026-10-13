@@ -15,6 +15,8 @@ from app.models.schemas import (
 from app.services import sesion_xubio as servicio_sesion
 from app.services.conciliador import conciliar_movimientos
 from app.services.cruce_afiliados import cruzar_movimientos_con_afiliados
+from app.services.importador_mayor import leer_mayor_desde_json
+from app.services.procesador_central import ErrorDeExtraccion
 from app.services.xubio_client import XubioClient, XubioNoConfigurado
 from app.services.xubio_web_client import XubioWebClient, XubioWebNoConfigurado
 
@@ -133,16 +135,6 @@ async def listar_afiliados():
     return {"exito": True, "cantidad": len(afiliados), "datos": afiliados}
 
 
-def _cantidad_libro_mayor(datos) -> Optional[int]:
-    """Cuenta las filas del JSON crudo de la grilla del reporte sin asumir su
-    forma exacta: ya sea una lista o un dict con la lista en "data"."""
-    if isinstance(datos, list):
-        return len(datos)
-    if isinstance(datos, dict) and isinstance(datos.get("data"), list):
-        return len(datos["data"])
-    return None
-
-
 @router.get("/libro-mayor")
 async def descargar_libro_mayor(
     desde: Optional[str] = Query(
@@ -158,9 +150,10 @@ async def descargar_libro_mayor(
 
     Es el mismo POST XML que arma el frontend web con el Bearer/cookie que
     captura el bot de login, asi que funciona aunque la cuenta no tenga
-    habilitada la API oficial. El JSON crudo de la grilla se devuelve tal
-    cual; el parseo a movimientos (cuando el cruce lo use) vive aca, en el
-    backend. Sin credenciales de sesion responde 503 sin llamar a nadie.
+    habilitada la API oficial. El JSON crudo de la grilla se parsea a los
+    movimientos del cruce (misma forma que /conciliacion/mayor) y se devuelve
+    en `movimientos`; `datos` queda con el crudo para diagnostico. Sin
+    credenciales de sesion responde 503 sin llamar a nadie.
     """
     try:
         datos = await cliente_web.obtener_libro_mayor(desde=desde, hasta=hasta)
@@ -173,11 +166,27 @@ async def descargar_libro_mayor(
             detail=f"No se pudo bajar el Libro Mayor de la web de Xubio: {e}",
         )
 
+    try:
+        lectura = leer_mayor_desde_json(datos)
+    except ErrorDeExtraccion as e:
+        # El motivo trae las columnas que se encontraron: es lo unico que
+        # permite corregir el mapeo contra la grilla real.
+        raise HTTPException(status_code=502, detail=str(e))
+
+    logger.info(
+        "Libro Mayor de Xubio (%s a %s): %d movimientos, convencion %s",
+        desde,
+        hasta,
+        len(lectura.datos),
+        lectura.convencion,
+    )
     return {
         "exito": True,
         "desde": desde,
         "hasta": hasta,
-        "cantidad": _cantidad_libro_mayor(datos),
+        "cantidad": len(lectura.datos),
+        "convencion": lectura.convencion,
+        "movimientos": lectura.datos,
         "datos": datos,
     }
 

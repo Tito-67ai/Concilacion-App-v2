@@ -23,6 +23,8 @@ codificaciones raras, separador ';') con dos diferencias:
 import logging
 from typing import NamedTuple
 
+import pandas as pd
+
 from app.services.Tools import limpiar_numero
 from app.services.importador_tablas import (
     _normalizar,
@@ -114,31 +116,26 @@ def _importes_mayor(fila) -> tuple[float, float]:
     return debe, haber
 
 
-def leer_mayor(ruta: str) -> LecturaMayor:
+def _desde_dataframe(df, fuente: str = "El archivo") -> LecturaMayor:
     """
-    Convierte el archivo contable en las filas que consume el cruce.
+    Convierte un DataFrame ya leido en las filas que consume el cruce.
+
+    Lo comparten la via archivo (leer_mayor) y el JSON del webreport de Xubio
+    (leer_mayor_desde_json): de donde salen las columnas no cambia como se
+    traducen los encabezados ni como se leen los signos.
 
     Cada fila queda como {fecha, concepto, comprobante, debe, haber}, que es lo
     que conciliador.conciliar_movimientos espera del lado de Xubio. Sin fecha no
-    hay cruce (la tolerancia se mide en dias), asi que un archivo cuyas fechas
+    hay cruce (la tolerancia se mide en dias), asi que una fuente cuyas fechas
     no se entienden se rechaza en vez de devolver una bandeja de pendientes
     eterna.
+
+    Antes de renombrar guarda los encabezados originales: el error tiene que
+    nombrar lo que traia la fuente, no como lo llamo el traductor.
     """
-    try:
-        df = leer_tabla(ruta, es_encabezado=_es_encabezado_de_mayor)
-        # Antes de renombrar: el error tiene que decirle al usuario que
-        # encabezados tenia SU archivo, no como los llamo el traductor, y hay
-        # que saber con que nombre original quedo cada canonica para decidir la
-        # convencion de los importes.
-        columnas = [str(c) for c in df.columns]
-        mapa = mapa_de_columnas(df)
-        df = normalizar_columnas(df)
-    except ErrorDeExtraccion:
-        raise
-    except Exception as e:
-        # openpyxl tira sus propias excepciones cuando el archivo no es un libro.
-        logger.exception("No se pudo leer el Libro Mayor")
-        raise ErrorDeExtraccion(f"No se pudo leer el Libro Mayor: {e}") from e
+    columnas = [str(c) for c in df.columns]
+    mapa = mapa_de_columnas(df)
+    df = normalizar_columnas(df)
 
     if "FECHA" not in df.columns:
         raise ErrorDeExtraccion(
@@ -202,7 +199,7 @@ def leer_mayor(ruta: str) -> LecturaMayor:
 
     if not movimientos:
         raise ErrorDeExtraccion(
-            "El archivo no tiene movimientos del Libro Mayor: no se encontro "
+            f"{fuente} no tiene movimientos del Libro Mayor: no se encontro "
             f"ninguna fila con importe. Se descartaron {sin_importe} filas sin "
             "Debe ni Haber."
         )
@@ -226,3 +223,88 @@ def leer_mayor(ruta: str) -> LecturaMayor:
         sin_fecha,
     )
     return LecturaMayor(movimientos, convencion)
+
+
+def leer_mayor(ruta: str) -> LecturaMayor:
+    """
+    Lee el archivo contable exportado desde el navegador.
+
+    Abre el Excel/CSV y delega el armado de las filas en _desde_dataframe, que
+    es el mismo que usa la via web de Xubio: un solo traductor de columnas y
+    una sola convencion de signos para las dos fuentes.
+    """
+    try:
+        df = leer_tabla(ruta, es_encabezado=_es_encabezado_de_mayor)
+    except ErrorDeExtraccion:
+        raise
+    except Exception as e:
+        # openpyxl tira sus propias excepciones cuando el archivo no es un libro.
+        logger.exception("No se pudo leer el Libro Mayor")
+        raise ErrorDeExtraccion(f"No se pudo leer el Libro Mayor: {e}") from e
+
+    return _desde_dataframe(df)
+
+
+# ----------------------------------------------------------------------
+# El mismo mayor, pero por la via web de Xubio (el JSON del webreport)
+# ----------------------------------------------------------------------
+
+
+# Nombres con los que el webreport puede guardar las filas dentro del JSON.
+_CLAVES_DE_FILAS = ("data", "datos", "rows", "filas", "registros", "items", "content")
+
+
+def _filas_del_webreport(datos) -> list[dict]:
+    """
+    Las filas del JSON crudo de la grilla, sin asumir como se llama la clave.
+
+    El webreport contesta la grilla sola, o dentro de una lista con nombre
+    ("data", "rows"...). Se busca por nombre conocido y, si no, la primera
+    lista del objeto. Solo sirven las filas tipo objeto: una lista de listas
+    sin encabezado no se puede mapear por nombre de columna.
+    """
+    if isinstance(datos, list):
+        crudo = datos
+    elif isinstance(datos, dict):
+        crudo = next(
+            (datos[c] for c in _CLAVES_DE_FILAS if isinstance(datos.get(c), list)),
+            None,
+        )
+        if crudo is None:
+            crudo = next((v for v in datos.values() if isinstance(v, list)), None)
+    else:
+        crudo = None
+
+    if not isinstance(crudo, list):
+        return []
+    return [fila for fila in crudo if isinstance(fila, dict)]
+
+
+def _sin_prefijo_de_parametro(nombre) -> str:
+    """'p_Fecha' -> 'Fecha': el webreport nombra sus parametros con p_."""
+    texto = str(nombre)
+    return texto[2:] if texto[:2].lower() == "p_" else texto
+
+
+def leer_mayor_desde_json(datos) -> LecturaMayor:
+    """
+    Convierte el JSON crudo del Libro Mayor de Xubio (webreport) en movimientos.
+
+    El webreport arma la grilla como JSON, no como Excel. Para no tener dos
+    maneras de leer un mayor se reusa el mismo traductor de encabezados que la
+    via archivo (importador_tablas): lo propio es el 'p_' con el que el reporte
+    nombra sus parametros ("p_Fecha"), que se saca antes de traducir.
+
+    Si no encuentra Fecha ni importe, el error dice que columnas habia: es lo
+    unico que sirve para corregir el mapeo contra una respuesta real.
+    """
+    filas = _filas_del_webreport(datos)
+    if not filas:
+        raise ErrorDeExtraccion(
+            "El Libro Mayor de Xubio no trajo movimientos. La grilla llego como "
+            f"{type(datos).__name__} y no tiene una lista de filas por objeto."
+        )
+
+    df = pd.DataFrame(filas)
+    df.columns = [_sin_prefijo_de_parametro(c) for c in df.columns]
+    return _desde_dataframe(df, fuente="El Libro Mayor de Xubio")

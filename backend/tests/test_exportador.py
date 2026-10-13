@@ -343,9 +343,12 @@ def test_los_encabezados_quedan_resaltados():
 def test_los_importes_conciliados_del_mayor_van_en_amarillo():
     hoja = _mayor(exportador.exportar(_solicitud()))
 
-    # Las dos filas del mayor cruzaron: los pendientes de Xubio son otra fila.
-    for coordenada in ("D10", "E10", "D11", "E11"):
-        assert hoja[coordenada].fill.fgColor.rgb == "FFFFFF00"
+    # Las dos filas del mayor cruzaron. Cada fila trae un importe solo: se pinta
+    # su celda, no las dos (FCA-1 es un debe, FCA-2 un haber).
+    assert hoja["D10"].fill.fgColor.rgb == "FFFFFF00"
+    assert hoja["E10"].fill.patternType is None
+    assert hoja["E11"].fill.fgColor.rgb == "FFFFFF00"
+    assert hoja["D11"].fill.patternType is None
     # La fila de Saldo Inicial no es un movimiento que cruce: no se pinta.
     assert hoja["D9"].fill.patternType is None
     assert hoja["E9"].fill.patternType is None
@@ -368,21 +371,23 @@ def test_una_fila_del_mayor_sin_cruzar_no_se_pinta():
         )
     )
 
-    # FCA-1 (fila 10) esta en los pendientes: no se pinta. La fila 11 si.
+    # FCA-1 (fila 10) esta en los pendientes: no se pinta. La fila 11 si
+    # (FCA-2 es un haber: el amarillo va en la celda E).
     assert hoja["D10"].fill.patternType is None
     assert hoja["E10"].fill.patternType is None
-    assert hoja["D11"].fill.fgColor.rgb == "FFFFFF00"
+    assert hoja["E11"].fill.fgColor.rgb == "FFFFFF00"
+    assert hoja["D11"].fill.patternType is None
 
 
 def test_la_hoja_de_movimientos_pinta_conciliados_y_pendientes():
     hoja = _movimientos(exportador.exportar(_solicitud()))
 
-    # COBRO (fila 9) cruzo: amarillo. COMISION (fila 10) es un debito pendiente
-    # de registracion contable: rosado.
-    assert hoja["D9"].fill.fgColor.rgb == "FFFFFF00"
+    # COBRO (fila 9) cruzo: su haber va en amarillo. COMISION (fila 10) es un
+    # debito pendiente de registracion contable: su debe va en verde claro.
     assert hoja["E9"].fill.fgColor.rgb == "FFFFFF00"
-    assert hoja["D10"].fill.fgColor.rgb == "FFD5A6BD"
-    assert hoja["E10"].fill.fgColor.rgb == "FFD5A6BD"
+    assert hoja["D9"].fill.patternType is None
+    assert hoja["D10"].fill.fgColor.rgb == "FF93C47D"
+    assert hoja["E10"].fill.patternType is None
 
 
 def test_las_columnas_de_importe_entran_los_numeros_y_no_quedan_en_piquitos():

@@ -19,7 +19,9 @@ columnas (A-Q) que arranca en la fila 8, con el saldo acumulado por formula
 `=F(anterior)+E-D` y una fila de control contra el mayor al final.
 
 Los importes que cruzaron van en amarillo y los debitos del banco pendientes de
-registracion contable, en rosado (colores del punto 4 del formulario).
+registracion contable, en verde claro (colores del punto 4 del formulario).
+Cada resaltado cubre solo la celda del importe que tiene valor (Debe o Haber),
+no las dos.
 
 La plantilla (assets/plantillas/FO 02-03 Conciliación Bancaria.xlsx) aporta solo
 el membrete: el formulario, su codigo, el titulo y las etiquetas azules son de
@@ -158,10 +160,10 @@ ANCHOS_MOVIMIENTOS = {
 # El alpha va FF (opaco): el mismo azul de las etiquetas "Empresa:" de la
 # plantilla. Con alpha 00 Excel pinta el relleno como transparente.
 RELLENO_ENCABEZADO = PatternFill("solid", fgColor="FF00B0F0")
-# Colores del spec: amarillo para los importes que cruzaron y rosado para los
-# debitos del banco que quedaron pendientes de registracion contable.
+# Colores del spec: amarillo para los importes que cruzaron y verde claro para
+# los debitos del banco que quedaron pendientes de registracion contable.
 RELLENO_CONCILIADO = PatternFill("solid", fgColor="FFFFFF00")
-RELLENO_PENDIENTE_BANCO = PatternFill("solid", fgColor="FFD5A6BD")
+RELLENO_PENDIENTE_BANCO = PatternFill("solid", fgColor="FF93C47D")
 FUENTE_ENCABEZADO = Font(name="Calibri", size=11, bold=True)
 FUENTE_TITULO_SECCION = Font(name="Calibri", size=11, bold=True)
 # shrink_to_fit: red de seguridad. Si un importe supera el ancho de la
@@ -254,9 +256,16 @@ def _clave_mayor(fecha, concepto, comprobante, debe, haber) -> tuple:
     )
 
 
-def _pintar(hoja: Worksheet, fila: int, columnas, relleno) -> None:
-    for columna in columnas:
-        hoja.cell(row=fila, column=columna).fill = relleno
+def _pintar_importe(hoja: Worksheet, fila: int, debe: float, haber: float, relleno) -> None:
+    """Pinta solo la celda del importe que tiene valor.
+
+    El debe va en la columna D y el haber en la E; una fila normalmente trae uno
+    solo. Se pinta esa celda, no las dos, como en el resto del formulario.
+    """
+    if debe:
+        hoja.cell(row=fila, column=4).fill = relleno
+    elif haber:
+        hoja.cell(row=fila, column=5).fill = relleno
 
 
 # ----------------------------------------------------------------------
@@ -404,9 +413,15 @@ def _armar_tabla_mayor(
             centradas={1, 2},
         )
         _celda_formula(hoja, fila, 6, f"=F{fila - 1}+D{fila}-E{fila}")
-        # La fila que no esta en pendientes cruzo: importes en amarillo.
-        if not es_pendiente and _importe(movimiento.debe or movimiento.haber):
-            _pintar(hoja, fila, (4, 5), RELLENO_CONCILIADO)
+        # La fila que no esta en pendientes cruzo: su importe va en amarillo.
+        if not es_pendiente:
+            _pintar_importe(
+                hoja,
+                fila,
+                _importe(movimiento.debe),
+                _importe(movimiento.haber),
+                RELLENO_CONCILIADO,
+            )
         celda_ultimo_saldo = f"F{fila}"
         fila += 1
 
@@ -566,12 +581,11 @@ def _armar_movimientos(
         debe = _importe(movimiento.debe)
         haber = _importe(movimiento.haber)
         if es_pendiente:
-            # Los debitos del banco pendientes de registracion van en rosado.
-            if debe:
-                _pintar(hoja, fila, (4, 5), RELLENO_PENDIENTE_BANCO)
+            # Los debitos del banco pendientes de registracion van en verde.
+            _pintar_importe(hoja, fila, debe, 0.0, RELLENO_PENDIENTE_BANCO)
         elif debe or haber:
-            # Cruzo contra el mayor: importes en amarillo.
-            _pintar(hoja, fila, (4, 5), RELLENO_CONCILIADO)
+            # Cruzo contra el mayor: el importe va en amarillo.
+            _pintar_importe(hoja, fila, debe, haber, RELLENO_CONCILIADO)
         fila += 1
 
     if fila > primer_dato:

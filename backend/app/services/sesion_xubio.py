@@ -11,6 +11,10 @@ POST /xubio/login guarda las credenciales y corre el bot de Playwright con el
 navegador visible (headless=False por defecto en XUBIO_BOT_HEADLESS), porque el
 login de Visma Connect puede pedir un captcha o una verificacion que se
 completa en la misma ventana.
+
+Ademas del token/cookie, el bot detecta la empresa y la cuenta del Libro Mayor;
+renovar_sesion guarda todo en el .env Y lo deja vivo en `settings`, para que el
+server use la sesion nueva sin reiniciar uvicorn.
 """
 
 from __future__ import annotations
@@ -18,7 +22,12 @@ from __future__ import annotations
 import logging
 
 from app.core.config import RAIZ_BACKEND, settings
-from app.services.sesion_xubio_bot import escribir_env, leer_env, obtener_sesion_xubio
+from app.services.sesion_xubio_bot import (
+    SesionCapturada,
+    escribir_env,
+    leer_env,
+    obtener_sesion_xubio,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,30 +60,62 @@ def guardar_credenciales(email: str, password: str) -> None:
 async def renovar_sesion(email: str, password: str, headless: bool) -> dict:
     """Corre el bot, guarda lo capturado en el .env y resume el resultado.
 
-    Devuelve {"token": bool, "cookie": bool}. El bot levanta RuntimeError si
-    no logra capturar una sesion valida (p.ej. quedo un paso a mano).
+    Devuelve {"token": bool, "cookie": bool, "empresa": bool, "cuenta": bool}.
+    El bot levanta RuntimeError si no logra capturar una sesion valida (p.ej.
+    quedo un paso a mano).
+
+    Ademas de escribir el .env, actualiza `settings` en memoria: el cliente de
+    la web lee la config en cada request, asi que sin esto el token recien
+    capturado no servia hasta reiniciar uvicorn (y el panel seguia diciendo
+    que no habia sesion).
     """
-    token, cookie = await obtener_sesion_xubio(
+    capturada = await obtener_sesion_xubio(
         email=email,
         password=password,
         headless=headless,
         slow_mo=50,
     )
     actualizar: dict[str, str] = {}
-    if token:
-        actualizar["XUBIO_WEB_TOKEN"] = token
-    if cookie:
-        actualizar["XUBIO_WEB_COOKIE"] = cookie
-    if not actualizar:
+    if capturada.token:
+        actualizar["XUBIO_WEB_TOKEN"] = capturada.token
+    if capturada.cookie:
+        actualizar["XUBIO_WEB_COOKIE"] = capturada.cookie
+    # Los codigos del Libro Mayor solo se reescriben si el bot los detecto: si
+    # no, se respeta lo que ya hubiera en el .env.
+    if capturada.empresa_report_code:
+        actualizar["XUBIO_WEB_EMPRESA_REPORT_CODE"] = capturada.empresa_report_code
+    if capturada.cuenta_report_code:
+        actualizar["XUBIO_WEB_CUENTA_REPORT_CODE"] = capturada.cuenta_report_code
+    if not (capturada.token or capturada.cookie):
         raise RuntimeError(
             "El bot no capturo ni token ni cookie de sesion. Puede que en la "
             "ventana que se abrio haya quedado un paso a mano; reintenta."
         )
     escribir_env(actualizar, RUTA_ENV)
+
+    # Mismo valor que quedo en el .env, pero vivo en el proceso actual.
+    if capturada.token:
+        settings.XUBIO_WEB_TOKEN = capturada.token
+    if capturada.cookie:
+        settings.XUBIO_WEB_COOKIE = capturada.cookie
+    if capturada.empresa_report_code:
+        settings.XUBIO_WEB_EMPRESA_REPORT_CODE = capturada.empresa_report_code
+    if capturada.cuenta_report_code:
+        settings.XUBIO_WEB_CUENTA_REPORT_CODE = capturada.cuenta_report_code
+
     logger.info(
-        "Sesion de Xubio renovada (token=%s cookie=%s)", bool(token), bool(cookie)
+        "Sesion de Xubio renovada (token=%s cookie=%s empresa=%s cuenta=%s)",
+        bool(capturada.token),
+        bool(capturada.cookie),
+        bool(capturada.empresa_report_code),
+        bool(capturada.cuenta_report_code),
     )
-    return {"token": bool(token), "cookie": bool(cookie)}
+    return {
+        "token": bool(capturada.token),
+        "cookie": bool(capturada.cookie),
+        "empresa": bool(capturada.empresa_report_code),
+        "cuenta": bool(capturada.cuenta_report_code),
+    }
 
 
 def cerrar_sesion(olvidar_credenciales: bool = False) -> dict:

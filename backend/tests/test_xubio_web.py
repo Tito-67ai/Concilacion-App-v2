@@ -146,6 +146,10 @@ def _transport_mayor(captura):
 
 async def test_obtener_libro_mayor_arma_el_payload_con_las_fechas(monkeypatch):
     monkeypatch.setattr(config.settings, "XUBIO_WEB_TOKEN", "309-token-de-prueba")
+    monkeypatch.setattr(config.settings, "XUBIO_WEB_EMPRESA_REPORT_CODE", "29774")
+    monkeypatch.setattr(
+        config.settings, "XUBIO_WEB_CUENTA_REPORT_CODE", "ARBOL_ID=1__SEPNO__0"
+    )
     captura: dict = {}
     cliente = XubioWebClient(transport=_transport_mayor(captura))
 
@@ -160,6 +164,46 @@ async def test_obtener_libro_mayor_arma_el_payload_con_las_fechas(monkeypatch):
     assert 'name="p_FechaDesde" value="2026-07-01"' in captura["cuerpo"]
     assert 'name="p_FechaHasta" value="2026-07-31"' in captura["cuerpo"]
     assert 'name="p_EmpresaReportCode" value="29774"' in captura["cuerpo"]
+    assert (
+        'name="p_CuentaReportCode" value="ARBOL_ID=1__SEPNO__0"' in captura["cuerpo"]
+    )
+
+
+async def test_obtener_libro_mayor_usa_la_empresa_de_la_config(monkeypatch):
+    """El reporte sale de la cuenta configurada, no de una empresa fija."""
+    monkeypatch.setattr(config.settings, "XUBIO_WEB_TOKEN", "309-token-de-prueba")
+    monkeypatch.setattr(config.settings, "XUBIO_WEB_EMPRESA_REPORT_CODE", "88888")
+    captura: dict = {}
+    cliente = XubioWebClient(transport=_transport_mayor(captura))
+
+    await cliente.obtener_libro_mayor(desde="2026-07-01", hasta="2026-07-31")
+
+    assert 'name="p_EmpresaReportCode" value="88888"' in captura["cuerpo"]
+
+
+async def test_obtener_libro_mayor_respeta_la_empresa_pasada_por_parametro(monkeypatch):
+    monkeypatch.setattr(config.settings, "XUBIO_WEB_TOKEN", "309-token-de-prueba")
+    monkeypatch.setattr(config.settings, "XUBIO_WEB_EMPRESA_REPORT_CODE", "88888")
+    captura: dict = {}
+    cliente = XubioWebClient(transport=_transport_mayor(captura))
+
+    await cliente.obtener_libro_mayor(
+        desde="2026-07-01", hasta="2026-07-31", empresa_report_code="12345"
+    )
+
+    assert 'name="p_EmpresaReportCode" value="12345"' in captura["cuerpo"]
+
+
+async def test_obtener_libro_mayor_sin_empresa_no_inventa_cuenta(monkeypatch):
+    monkeypatch.setattr(config.settings, "XUBIO_WEB_TOKEN", "309-token-de-prueba")
+    monkeypatch.setattr(config.settings, "XUBIO_WEB_EMPRESA_REPORT_CODE", "")
+    captura: dict = {}
+    cliente = XubioWebClient(transport=_transport_mayor(captura))
+
+    with pytest.raises(XubioWebNoConfigurado, match="EMPRESA_REPORT_CODE"):
+        await cliente.obtener_libro_mayor(desde="2026-07-01", hasta="2026-07-31")
+    # Sin empresa no se llamo a nadie: no hay reporte de una cuenta inventada.
+    assert captura == {}
 
 
 async def test_obtener_libro_mayor_sin_fechas_usa_los_ultimos_30_dias(monkeypatch):
@@ -179,6 +223,7 @@ async def test_obtener_libro_mayor_sin_fechas_usa_los_ultimos_30_dias(monkeypatc
 async def test_obtener_libro_mayor_sin_credenciales_lanza(monkeypatch):
     monkeypatch.setattr(config.settings, "XUBIO_WEB_COOKIE", "")
     monkeypatch.setattr(config.settings, "XUBIO_WEB_TOKEN", "")
+    monkeypatch.setattr(config.settings, "XUBIO_WEB_EMPRESA_REPORT_CODE", "29774")
     cliente = XubioWebClient(transport=_transport_mayor({}))
 
     with pytest.raises(XubioWebNoConfigurado, match="XUBIO_WEB_COOKIE"):
@@ -341,6 +386,7 @@ def test_libro_mayor_baja_por_la_sesion_web(monkeypatch):
 
     monkeypatch.setattr(config.settings, "XUBIO_WEB_COOKIE", "")
     monkeypatch.setattr(config.settings, "XUBIO_WEB_TOKEN", "309-token-de-prueba")
+    monkeypatch.setattr(config.settings, "XUBIO_WEB_EMPRESA_REPORT_CODE", "29774")
     captura: dict = {}
     monkeypatch.setattr(
         rutas_xubio, "cliente_web", XubioWebClient(transport=_transport_mayor(captura))

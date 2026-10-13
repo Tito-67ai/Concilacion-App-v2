@@ -12,6 +12,11 @@ dos entradas:
     (POST /api/xubio/login), que guarda credenciales y renueva con el
     navegador visible.
 
+Ademas del token/cookie, el bot detecta de la sesion los codigos de empresa y
+cuenta con los que se pide el Libro Mayor (los mira pasar en las llamadas de la
+app o en el almacenamiento del SPA), asi el reporte sale de la cuenta que se
+logueo y no de una empresa fija.
+
 El login es en DOS pasos: primero el email (#Username) y despues la
 contrasena. Si el selector del segundo paso cambia, el script intenta varias
 alternativas y, si no encuentra ninguna, imprime los inputs visibles para
@@ -30,6 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 URL_LOGIN = "https://xubio.com/NXV/vismaConnect/login"
@@ -46,6 +52,63 @@ SELECTORES_PASSWORD = [
     'input[name="Password"]',
     "#password",
 ]
+
+# Como aparece el codigo de empresa del reporte (Libro Mayor) en las llamadas
+# de la app: en el cuerpo XML del webreport, en un JSON o en la query. El orden
+# importa: primero el formato exacto del webreport y despues las variantes.
+PATRONES_EMPRESA = (
+    r'name="p_EmpresaReportCode"\s+value="([^"]+)"',
+    r'"p_EmpresaReportCode"\s*:\s*"?([0-9]+)"?',
+    r'p_EmpresaReportCode["\']?\s*[:=]\s*"?([0-9]+)',
+    r'"empresaReportCode"\s*:\s*"?([0-9]+)"?',
+    r'empresaReportCode["\']?\s*[:=]\s*"?([0-9]+)',
+)
+
+# El codigo de cuenta es un arbol ("ARBOL_ID=1__SEPNO__0"), asi que el valor
+# admite letras, numeros, "=" y "_" ademas de los caracteres de una query.
+PATRONES_CUENTA = (
+    r'name="p_CuentaReportCode"\s+value="([^"]+)"',
+    r'"p_CuentaReportCode"\s*:\s*"([^"]+)"',
+    r'p_CuentaReportCode["\']?\s*[:=]\s*"?([^"&<\s]+)',
+    r'"cuentaReportCode"\s*:\s*"([^"]+)"',
+    r'cuentaReportCode["\']?\s*[:=]\s*"?([^"&<\s]+)',
+)
+
+
+@dataclass
+class SesionCapturada:
+    """Lo que el bot rescata de la sesion: como autenticarse y de que cuenta.
+
+    El token/cookie sirven para llamar a la web de Xubio; la empresa y la
+    cuenta son los codigos con los que se pide el Libro Mayor, para que el
+    reporte salga de la cuenta que se logueo y no de una fija.
+    """
+
+    token: str | None = None
+    cookie: str | None = None
+    empresa_report_code: str | None = None
+    cuenta_report_code: str | None = None
+
+
+def primer_grupo(texto: str, patrones: tuple[str, ...]) -> str | None:
+    """Primera captura de la lista de patrones, o None si ninguno matchea."""
+    for patron in patrones:
+        coincidencia = re.search(patron, texto, re.I)
+        if coincidencia:
+            return coincidencia.group(1).strip()
+    return None
+
+
+def extraer_codigos_reportes(texto: str) -> tuple[str | None, str | None]:
+    """Saca (empresa, cuenta) del texto de una llamada o del almacenamiento.
+
+    Es puro a proposito: los patrones se prueban sin abrir Chromium ni tocar la
+    red, y en vivo solo queda confirmar con que los manda la app real.
+    """
+    return (
+        primer_grupo(texto, PATRONES_EMPRESA),
+        primer_grupo(texto, PATRONES_CUENTA),
+    )
 
 
 def leer_env(path: Path) -> dict[str, str]:
@@ -238,25 +301,38 @@ async def llenar_primero(page, selectores: list[str], valor: str) -> bool:
     return False
 
 
+async def leer_almacenamiento(page) -> dict[str, str]:
+    """Vuelca localStorage + sessionStorage de la pagina como diccionario."""
+    try:
+        candidatas = await page.evaluate(
+            """() => {
+                const todas = {};
+                const guardar = (storage) => {
+                    for (let i = 0; i < storage.length; i++) {
+                        const k = storage.key(i);
+                        const v = storage.getItem(k);
+                        todas[k] = v;
+                    }
+                };
+                try { guardar(localStorage); } catch (e) {}
+                try { guardar(sessionStorage); } catch (e) {}
+                return todas;
+            }"""
+        )
+    except Exception:
+        return {}
+    return {
+        clave: valor
+        for clave, valor in (candidatas or {}).items()
+        if isinstance(valor, str)
+    }
+
+
 async def buscar_token_en_storage(page) -> str | None:
     """Ultimo recurso: token guardado por el SPA en localStorage/sessionStorage."""
-    candidatas = await page.evaluate(
-        """() => {
-            const todas = {};
-            const guardar = (storage) => {
-                for (let i = 0; i < storage.length; i++) {
-                    const k = storage.key(i);
-                    const v = storage.getItem(k);
-                    todas[k] = v;
-                }
-            };
-            try { guardar(localStorage); } catch (e) {}
-            try { guardar(sessionStorage); } catch (e) {}
-            return todas;
-        }"""
-    )
+    candidatas = await leer_almacenamiento(page)
     mejor: str | None = None
-    for clave, valor in (candidatas or {}).items():
+    for clave, valor in candidatas.items():
         if not isinstance(valor, str) or len(valor) < 16:
             continue
         if not re.search(r"token|auth|sesion|session|jwt|bearer", clave, re.I):
@@ -273,12 +349,14 @@ async def obtener_sesion_xubio(
     password: str,
     headless: bool,
     slow_mo: int,
-) -> tuple[str | None, str | None]:
+) -> SesionCapturada:
     """
     Abre el navegador, se loguea en Xubio y captura la sesion.
 
-    Devuelve (token_bearer | None, cookie_cruda | None). Si el login falla
-    levanta RuntimeError con un mensaje que ayuda a corregir selectores.
+    Devuelve una SesionCapturada con el token Bearer, la cookie cruda y los
+    codigos de empresa/cuenta del Libro Mayor si los pudo ver en las llamadas
+    de la app. Si el login falla levanta RuntimeError con un mensaje que ayuda
+    a corregir selectores.
     """
     # Import perezoso: la CLI debe poder dar --help o avisar que faltan
     # credenciales aunque playwright no este instalado todavia.
@@ -304,7 +382,7 @@ async def obtener_sesion_xubio(
                 "    uv run playwright install chromium"
             )
 
-    captura = {"token": None}
+    captura: dict[str, str | None] = {"token": None, "empresa": None, "cuenta": None}
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=headless, slow_mo=slow_mo)
@@ -315,12 +393,29 @@ async def obtener_sesion_xubio(
             # El SPA de Xubio manda el Bearer en sus llamadas: capturar el
             # Authorization de cualquier request a la app (core/app.xubio.com),
             # no solo de /sba/api.
-            if captura["token"]:
-                return
-            if any(d in request.url for d in DOMINIOS_SESION):
+            if not captura["token"] and any(d in request.url for d in DOMINIOS_SESION):
                 auth = (request.headers.get("authorization") or "").strip()
                 if auth.lower().startswith("bearer "):
                     captura["token"] = auth[7:].strip()
+
+            # Empresa y cuenta del Libro Mayor: viajan en la query o en el
+            # cuerpo XML del webreport, que la app arma con la cuenta logueada.
+            # Se miran las llamadas a cualquier dominio de Xubio (el reporte
+            # puede salir de xubio.com y no de core.xubio.com).
+            if "xubio.com" not in request.url:
+                return
+            if captura["empresa"] and captura["cuenta"]:
+                return
+            texto = request.url
+            try:
+                cuerpo = request.post_data
+            except Exception:
+                cuerpo = None
+            if cuerpo:
+                texto = f"{texto}\n{cuerpo}"
+            empresa, cuenta = extraer_codigos_reportes(texto)
+            captura["empresa"] = captura["empresa"] or empresa
+            captura["cuenta"] = captura["cuenta"] or cuenta
 
         # Escuchar en todo el contexto: la app puede abrirse en otra pestana.
         context.on("request", en_request)
@@ -424,6 +519,21 @@ async def obtener_sesion_xubio(
                     if captura["token"]:
                         break
 
+            # Empresa y cuenta del Libro Mayor: si no las vimos pasar en una
+            # llamada, quedan a veces en el almacenamiento del SPA. Sin esto el
+            # reporte volveria a la empresa por defecto del .env.
+            if not captura["empresa"] or not captura["cuenta"]:
+                for pestana in context.pages:
+                    almacen = await leer_almacenamiento(pestana)
+                    if not almacen:
+                        continue
+                    texto = "\n".join(f"{k}={v}" for k, v in almacen.items())
+                    empresa, cuenta = extraer_codigos_reportes(texto)
+                    captura["empresa"] = captura["empresa"] or empresa
+                    captura["cuenta"] = captura["cuenta"] or cuenta
+                    if captura["empresa"] and captura["cuenta"]:
+                        break
+
             # Si no llegamos a la app, diagnosticar en vez de escribir basura.
             if not captura["token"] and not url_aplicacion():
                 estado = []
@@ -464,8 +574,22 @@ async def obtener_sesion_xubio(
             ]
             cookie_cruda = "; ".join(pares)
             print("   url final:", [(p.url) for p in context.pages])
+            if captura["empresa"]:
+                print("   empresa del Libro Mayor:", captura["empresa"])
+            else:
+                print(
+                    "   empresa del Libro Mayor: no se detecto (se mantiene la "
+                    "del .env)"
+                )
+            if captura["cuenta"]:
+                print("   cuenta del Libro Mayor:", captura["cuenta"])
 
-            return captura["token"], (cookie_cruda or None)
+            return SesionCapturada(
+                token=captura["token"],
+                cookie=cookie_cruda or None,
+                empresa_report_code=captura["empresa"],
+                cuenta_report_code=captura["cuenta"],
+            )
 
         finally:
             print("8. Cerrando el navegador...")

@@ -7,6 +7,11 @@ en backend/.env las variables que consume XubioWebClient:
     XUBIO_WEB_TOKEN=...   # Authorization: Bearer <token>
     XUBIO_WEB_COOKIE=...  # header Cookie crudo, formato nombre=valor; ...
 
+y, si los detecta, los codigos de la cuenta para el Libro Mayor:
+
+    XUBIO_WEB_EMPRESA_REPORT_CODE=...
+    XUBIO_WEB_CUENTA_REPORT_CODE=...
+
 Uso:
     uv run python scripts/obtener_sesion_xubio.py
     uv run python scripts/obtener_sesion_xubio.py --email a@b.com --password '...'
@@ -36,6 +41,7 @@ if str(_RAIZ_BACKEND) not in sys.path:
     sys.path.insert(0, str(_RAIZ_BACKEND))
 
 from app.services.sesion_xubio_bot import (  # noqa: E402
+    SesionCapturada,
     escribir_env,
     leer_env,
     obtener_sesion_xubio,
@@ -68,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        token, cookie = asyncio.run(
+        capturada = asyncio.run(
             obtener_sesion_xubio(
                 email=email,
                 password=password,
@@ -81,21 +87,25 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     print("\n--- Sesion capturada ---")
-    if token:
-        print(f"XUBIO_WEB_TOKEN={token}")
+    if capturada.token:
+        print(f"XUBIO_WEB_TOKEN={capturada.token}")
     else:
         print("# (no se capturo token Bearer)")
-    if cookie:
-        print(f"XUBIO_WEB_COOKIE={cookie}")
+    if capturada.cookie:
+        print(f"XUBIO_WEB_COOKIE={capturada.cookie}")
     else:
         print("# (no se capturaron cookies de sesion)")
+    if capturada.empresa_report_code:
+        print(f"XUBIO_WEB_EMPRESA_REPORT_CODE={capturada.empresa_report_code}")
+    else:
+        print("# (no se detecto la empresa del Libro Mayor)")
+    if capturada.cuenta_report_code:
+        print(f"XUBIO_WEB_CUENTA_REPORT_CODE={capturada.cuenta_report_code}")
+    else:
+        print("# (no se detecto la cuenta del Libro Mayor)")
 
     if args.write:
-        actualizar = {}
-        if token:
-            actualizar["XUBIO_WEB_TOKEN"] = token
-        if cookie:
-            actualizar["XUBIO_WEB_COOKIE"] = cookie
+        actualizar = _como_env(capturada)
         if actualizar:
             escribir_env(actualizar, RUTA_ENV)
             print(f"\nActualizado {RUTA_ENV}.")
@@ -107,6 +117,20 @@ def main(argv: list[str] | None = None) -> int:
             "en backend/.env."
         )
     return 0
+
+
+def _como_env(capturada: SesionCapturada) -> dict[str, str]:
+    """Lo capturado como claves del .env, salteando lo que no se detecto."""
+    actualizar: dict[str, str] = {}
+    if capturada.token:
+        actualizar["XUBIO_WEB_TOKEN"] = capturada.token
+    if capturada.cookie:
+        actualizar["XUBIO_WEB_COOKIE"] = capturada.cookie
+    if capturada.empresa_report_code:
+        actualizar["XUBIO_WEB_EMPRESA_REPORT_CODE"] = capturada.empresa_report_code
+    if capturada.cuenta_report_code:
+        actualizar["XUBIO_WEB_CUENTA_REPORT_CODE"] = capturada.cuenta_report_code
+    return actualizar
 
 
 if __name__ == "__main__":

@@ -7,12 +7,15 @@ funciones del servicio escriben en RUTA_ENV, que estos tests apuntan a un
 archivo temporal de prueba, nunca al .env real del backend.
 """
 
+import asyncio
+
 import pytest
 from fastapi.testclient import TestClient
 
 from app.core import config
 from app.main import app
 from app.services import sesion_xubio as servicio_sesion
+from app.services.sesion_xubio_bot import SesionCapturada
 
 cliente_test = TestClient(app)
 
@@ -161,6 +164,68 @@ def test_salir_de_xubio_borra_token_y_cookie_sin_tocar_credenciales(env_temporal
     # hace falta reiniciar uvicorn para que el 503 de afiliados vuelva.
     assert config.settings.XUBIO_WEB_TOKEN == ""
     assert config.settings.XUBIO_WEB_COOKIE == ""
+
+
+def test_renovar_sesion_guarda_codigos_y_toca_la_memoria(env_temporal, monkeypatch):
+    """El login no alcanza con escribir el .env: el proceso tiene que ver la
+    sesion nueva sin reiniciar (antes el token recien capturado no servia hasta
+    reiniciar uvicorn y el panel seguia diciendo que no habia sesion)."""
+
+    async def bot_fake(email, password, headless, slow_mo):
+        return SesionCapturada(
+            token="309-token-nuevo",
+            cookie="sesion=abc",
+            empresa_report_code="88888",
+            cuenta_report_code="ARBOL_ID=2__SEPNO__0",
+        )
+
+    monkeypatch.setattr(servicio_sesion, "obtener_sesion_xubio", bot_fake)
+    monkeypatch.setattr(config.settings, "XUBIO_WEB_TOKEN", "")
+    monkeypatch.setattr(config.settings, "XUBIO_WEB_COOKIE", "")
+
+    resultado = asyncio.run(
+        servicio_sesion.renovar_sesion("a@b.com", "x", headless=False)
+    )
+
+    assert resultado == {
+        "token": True,
+        "cookie": True,
+        "empresa": True,
+        "cuenta": True,
+    }
+    guardado = env_temporal.read_text(encoding="utf-8")
+    assert "XUBIO_WEB_TOKEN=309-token-nuevo" in guardado
+    assert "XUBIO_WEB_COOKIE=sesion=abc" in guardado
+    assert "XUBIO_WEB_EMPRESA_REPORT_CODE=88888" in guardado
+    assert "XUBIO_WEB_CUENTA_REPORT_CODE=ARBOL_ID=2__SEPNO__0" in guardado
+    # Y en memoria: el cliente de la web lee settings en cada request.
+    assert config.settings.XUBIO_WEB_TOKEN == "309-token-nuevo"
+    assert config.settings.XUBIO_WEB_EMPRESA_REPORT_CODE == "88888"
+    assert config.settings.XUBIO_WEB_CUENTA_REPORT_CODE == "ARBOL_ID=2__SEPNO__0"
+
+
+def test_renovar_sin_codigos_no_pisa_lo_configurado(env_temporal, monkeypatch):
+    """Si el bot no detecta la cuenta, se respeta lo que ya hubiera en el .env
+    (o el default de config): no se escribe una empresa vacia."""
+
+    async def bot_fake(email, password, headless, slow_mo):
+        return SesionCapturada(token="309-token", cookie=None)
+
+    monkeypatch.setattr(servicio_sesion, "obtener_sesion_xubio", bot_fake)
+
+    resultado = asyncio.run(
+        servicio_sesion.renovar_sesion("a@b.com", "x", headless=False)
+    )
+
+    assert resultado == {
+        "token": True,
+        "cookie": False,
+        "empresa": False,
+        "cuenta": False,
+    }
+    guardado = env_temporal.read_text(encoding="utf-8")
+    assert "XUBIO_WEB_TOKEN=309-token" in guardado
+    assert "XUBIO_WEB_EMPRESA_REPORT_CODE" not in guardado
 
 
 def test_cerrar_sesion_olvida_tambien_las_credenciales(env_temporal, monkeypatch):

@@ -30,6 +30,14 @@ class Settings(BaseSettings):
     XUBIO_WEB_COOKIE: str = ""
     XUBIO_WEB_TOKEN: str = ""
 
+    # Empresa y cuenta del reporte del Libro Mayor (el POST XML a webreport).
+    # El bot de login las detecta de la sesion y las reescribe aca, asi que en
+    # general no hay que tocarlas a mano: el default es la empresa de este
+    # estudio, para no romper si el bot todavia no corrio. Si quedan vacias,
+    # el cliente se niega a pedir el reporte en vez de inventar una cuenta.
+    XUBIO_WEB_EMPRESA_REPORT_CODE: str = "29774"
+    XUBIO_WEB_CUENTA_REPORT_CODE: str = "ARBOL_ID=1__SEPNO__0"
+
     # El bot de sesion (sesion_xubio_bot.py) abre el navegador de Playwright
     # visible por defecto, porque el login de Visma Connect puede pedir captcha
     # o verificacion que se completa a mano en esa ventana. En un server de

@@ -15,7 +15,10 @@ nombre real del boton.
 
 import re
 
-from app.services.sesion_xubio_bot import clic_continuar_sesion_activa
+from app.services.sesion_xubio_bot import (
+    clic_continuar_sesion_activa,
+    extraer_codigos_reportes,
+)
 
 
 class RegistroClicks:
@@ -161,3 +164,52 @@ async def test_aviso_con_otro_nombre_de_boton_no_lo_confunde():
 
     assert await clic_continuar_sesion_activa(pagina) is False
     assert pagina.clicks == 0
+
+
+# --------------------------------------------------------------------------
+# Deteccion de la cuenta (empresa/cuenta) del Libro Mayor
+#
+# Los patrones se prueban contra los formatos en que la app puede mandarlos:
+# el cuerpo XML del webreport, un JSON y la query. En vivo solo queda
+# confirmar cual usa la cuenta real.
+# --------------------------------------------------------------------------
+
+
+def test_extrae_empresa_y_cuenta_del_xml_del_webreport():
+    cuerpo = (
+        '<?xml version="1.0" encoding="UTF-8"?><postData><parameters>'
+        '<parameter name="p_CuentaReportCode" value="ARBOL_ID=1__SEPNO__0" />'
+        '<parameter name="p_EmpresaReportCode" value="29774" />'
+        "</parameters></postData>"
+    )
+
+    assert extraer_codigos_reportes(cuerpo) == ("29774", "ARBOL_ID=1__SEPNO__0")
+
+
+def test_extrae_los_codigos_de_un_json():
+    cuerpo = (
+        '{"p_EmpresaReportCode": 29774, '
+        '"p_CuentaReportCode": "ARBOL_ID=1__SEPNO__0"}'
+    )
+
+    assert extraer_codigos_reportes(cuerpo) == ("29774", "ARBOL_ID=1__SEPNO__0")
+
+
+def test_extrae_los_codigos_de_la_query():
+    url = (
+        "https://core.xubio.com/NXV/webreport/data"
+        "?empresaReportCode=29774&cuentaReportCode=ARBOL_ID=1__SEPNO__0"
+    )
+
+    assert extraer_codigos_reportes(url) == ("29774", "ARBOL_ID=1__SEPNO__0")
+
+
+def test_sin_codigos_devuelve_none_sin_inventar():
+    texto = "GET /ar/sba/api/cliente/clientes/findAllPaginado/0/20"
+
+    assert extraer_codigos_reportes(texto) == (None, None)
+
+
+def test_no_toma_cualquier_numero_como_empresa():
+    # Un id de cliente suelto no es el codigo de empresa del reporte.
+    assert extraer_codigos_reportes('{"id": 5261262}') == (None, None)

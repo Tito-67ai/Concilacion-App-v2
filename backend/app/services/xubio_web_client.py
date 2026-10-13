@@ -35,10 +35,6 @@ class XubioWebClient:
     RUTA_CLIENTES = "/ar/sba/api/cliente/clientes/findAllPaginado"
     # El Libro Mayor se baja con el mismo POST XML que arma el frontend web.
     RUTA_LIBRO_MAYOR = "/NXV/webreport/data"
-    # Empresa fija de este estudio en el payload del reporte. Si la app llega
-    # a manejar varias cuentas de Xubio, esto tiene que pasar a ser un
-    # parametro dinámico, igual que las fechas.
-    EMPRESA_REPORT_CODE = "29774"
 
     def __init__(self, transport: httpx.AsyncBaseTransport | None = None):
         self.base_url = settings.XUBIO_WEB_URL.rstrip("/")
@@ -53,6 +49,14 @@ class XubioWebClient:
     @property
     def _token(self) -> str:
         return (settings.XUBIO_WEB_TOKEN or "").strip()
+
+    @property
+    def _empresa_report_code(self) -> str:
+        return (settings.XUBIO_WEB_EMPRESA_REPORT_CODE or "").strip()
+
+    @property
+    def _cuenta_report_code(self) -> str:
+        return (settings.XUBIO_WEB_CUENTA_REPORT_CODE or "").strip()
 
     @property
     def headers(self) -> dict:
@@ -108,7 +112,7 @@ class XubioWebClient:
         self,
         desde: str | None = None,
         hasta: str | None = None,
-        empresa_report_code: str = EMPRESA_REPORT_CODE,
+        empresa_report_code: str | None = None,
     ) -> dict:
         """Baja el Libro Mayor por la misma via que el navegador (webreport).
 
@@ -118,9 +122,21 @@ class XubioWebClient:
         van dentro del payload; si no se pasan, el rango es los ultimos 30
         dias. El JSON de la grilla se devuelve crudo: el parseo a movimientos
         vive en el backend, igual que con los afiliados.
+
+        La empresa sale de XUBIO_WEB_EMPRESA_REPORT_CODE (la detecta el bot al
+        loguearse) o del parametro, para no quedar atado a una sola cuenta.
         """
         desde = desde or (date.today() - timedelta(days=30)).isoformat()
         hasta = hasta or date.today().isoformat()
+
+        empresa = (empresa_report_code or self._empresa_report_code).strip()
+        if not empresa:
+            raise XubioWebNoConfigurado(
+                "Falta XUBIO_WEB_EMPRESA_REPORT_CODE: no se sabe de que empresa "
+                "bajar el Libro Mayor. Inicia sesion con el bot para detectarla, "
+                "o defini la empresa en el .env."
+            )
+        cuenta = self._cuenta_report_code
 
         payload_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <postData>
@@ -128,13 +144,13 @@ class XubioWebClient:
     <parameters>
         <parameter type="FafDate" name="p_FechaDesde" value="{desde}" />
         <parameter type="FafDate" name="p_FechaHasta" value="{hasta}" />
-        <parameter type="" name="p_CuentaReportCode" value="ARBOL_ID=1__SEPNO__0" />
+        <parameter type="" name="p_CuentaReportCode" value="{cuenta}" />
         <parameter type="FafBoolean" name="p_SoloConSaldo" value="false" />
         <parameter type="" name="p_OrganizacionReportCode" value="" />
         <parameter type="FafBoolean" name="p_IncluirClientes" value="true" />
         <parameter type="FafBoolean" name="p_IncluirProveedores" value="true" />
         <parameter type="" name="p_MonedaReportCode" value="" />
-        <parameter type="" name="p_EmpresaReportCode" value="{empresa_report_code}" />
+        <parameter type="" name="p_EmpresaReportCode" value="{empresa}" />
         <parameter type="FafInteger" name="p_VerPor" value="0" />
         <parameter type="FafBoolean" name="p_SoloCuentasDisponibilidad" value="false" />
         <parameter type="" name="p_circuitoContable" value="-2" />

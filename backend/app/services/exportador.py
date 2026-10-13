@@ -7,20 +7,23 @@ Estructura (hoja "Libro Mayor") - segun modelo de auditoria:
     Fila 9      encabezado: Fecha | Documento | Cuenta | Debe | Haber | Saldo |
                 Descripcion | Organizacion | Centro de Costos.
     Fila 10     "Saldo Inicial" con el saldo en la columna F.
-    Fila 11+    TODOS los movimientos del mayor (conciliados + pendientes Xubio),
-                ordenados por fecha. Formula de saldo en col F:
-                =F(anterior)+D(este)-E(este).
+    Fila 11+    TODOS los movimientos del mayor ordenados por fecha, saldo por formula.
 
 Hoja "Movimientos Bancarios" - extracto resumido del banco:
 
     Filas 1-6   membrete (formulas contra Libro Mayor).
     Fila 8      encabezado: Fecha contable | Concepto | Debito en $ | Credito en $ | Saldo en $.
     Fila 9      "Saldo Inicial" con el saldo en la columna E.
-    Fila 10+    TODOS los movimientos del extracto (conciliados + pendientes banco),
-                ordenados por fecha. Debitos van en C (negativos), Creditos en D (positivos).
-                Saldo en E = saldo anterior + credito - debito (valores con signo).
+    Fila 10+    TODOS los movimientos del extracto (sin repetidos), debito=negativo, credito=positivo, saldo acumulado.
 
-Hoja "Extracto Bruto" (opcional): el extracto completo de 17 columnas tal cual viene.
+Cuadro de sumas por subcategoria (cols I-K de Movimientos Bancarios):
+    Concepto | Suma Crédito | Suma Débito
+    Ingresos Brutos | X | Y
+    IVA | X | Y
+    Comisiones | X | Y
+    Impuestos | X | Y
+    Sellado | X | Y
+    TOTAL | X | Y
 
 La plantilla (assets/plantillas/FO 02-03 Conciliación Bancaria.xlsx) aporta solo
 el membrete: el formulario, su codigo, el titulo y las etiquetas azules son de
@@ -46,7 +49,7 @@ from app.models.schemas import (
     PendienteExport,
     SolicitudExportacion,
 )
-from app.services.clasificacion import es_gasto_bancario
+from app.services.clasificacion import es_gasto_bancario, _subcategoria_gasto
 
 DIRECTORIO_PLANTILLAS = Path(__file__).resolve().parent.parent / "assets" / "plantillas"
 NOMBRE_PLANTILLA = "FO 02-03 Conciliación Bancaria.xlsx"
@@ -98,7 +101,7 @@ COLUMNAS_MOV = [
 
 # Anchos de columna (caracteres)
 ANCHOS_MAYOR = {"A": 12.0, "B": 22.0, "C": 28.0, "D": 16.0, "E": 16.0, "F": 18.0, "G": 35.0, "H": 22.0, "I": 18.0}
-ANCHOS_MOV = {"A": 14.0, "B": 45.0, "C": 18.0, "D": 18.0, "E": 18.0}
+ANCHOS_MOV = {"A": 14.0, "B": 45.0, "C": 18.0, "D": 18.0, "E": 18.0, "I": 16.0, "J": 18.0, "K": 18.0}
 
 # ----------------------------------------------------------------------
 # Estilos
@@ -115,6 +118,10 @@ ALINEACION_CENTRO = Alignment(horizontal="center")
 ALINEACION_DERECHA = Alignment(horizontal="right", shrink_to_fit=True)
 BORDE_FINO = Border(bottom=Side(style="thin"))
 BORDE_DOBLE = Border(top=Side(style="thin"), bottom=Side(style="double"))
+BORDE_CUADRO = Border(
+    top=Side(style="thin"), bottom=Side(style="thin"),
+    left=Side(style="thin"), right=Side(style="thin")
+)
 
 # ----------------------------------------------------------------------
 # Utilidades
@@ -297,14 +304,14 @@ def _armar_libro_mayor(hoja: Worksheet, solicitud: SolicitudExportacion, pendien
             hoja, fila,
             [
                 _fecha(mov.fecha),
-                mov.comprobante or "",
-                "",  # Cuenta (no la tenemos)
-                debe if debe else None,
-                haber if haber else None,
-                None,  # Saldo -> formula abajo
-                mov.concepto or "",
-                "",  # Organización
-                "",  # Centro de Costos
+                mov.comprobante or "",           # B: Documento
+                mov.documento or "",             # C: Documento (referencia)
+                debe if debe else None,          # D: Debe
+                haber if haber else None,        # E: Haber
+                None,                            # F: Saldo -> formula
+                mov.descripcion or mov.concepto or "",  # G: Descripción
+                mov.organizacion or "",          # H: Organización
+                mov.cuenta or "",                # I: Centro de Costos
             ],
             formato_importe_idx={3, 4},  # D, E
         )
@@ -318,7 +325,7 @@ def _armar_libro_mayor(hoja: Worksheet, solicitud: SolicitudExportacion, pendien
         if es_pendiente:
             pendientes_xubio[clave] -= 1
         elif debe or haber:
-            # Amarillo en las celdas con valor (D y/o E)
+            # Amarillo en las celdas con valor (D, E)
             for col_idx in (4, 5):  # D, E
                 c = hoja.cell(row=fila, column=col_idx)
                 if c.value not in (None, 0):
@@ -330,6 +337,7 @@ def _armar_libro_mayor(hoja: Worksheet, solicitud: SolicitudExportacion, pendien
 # ----------------------------------------------------------------------
 # Hoja MOVIMIENTOS BANCARIOS
 # ----------------------------------------------------------------------
+
 
 def _armar_movimientos_bancarios(
     hoja: Worksheet,
@@ -403,9 +411,95 @@ def _armar_movimientos_bancarios(
         fila += 1
 
 
+def _armar_cuadro_subcategorias(
+    hoja: Worksheet,
+    fila_inicio: int,
+    pendientes_banco: list[PendienteExport],
+) -> None:
+    """Cuadro de sumas por subcategoria a la derecha de la tabla (cols I-K).
+
+    Columnas: I=Concepto, J=Suma Crédito, K=Suma Débito.
+    Solo muestra subcategorias con importe > 0.
+    """
+    from app.services.clasificacion import _subcategoria_gasto
+
+    # Acumular por subcategoria
+    sumas: dict[str, dict[str, float]] = {}
+    for p in pendientes_banco:
+        if not es_gasto_bancario(p.concepto):
+            continue
+        sub = _subcategoria_gasto(p.concepto)
+        if not sub:
+            continue
+        debe = _importe(p.debe)
+        haber = _importe(p.haber)
+        if debe == 0 and haber == 0:
+            continue
+        if sub not in sumas:
+            sumas[sub] = {"credito": 0.0, "debito": 0.0}
+        sumas[sub]["credito"] += haber
+        sumas[sub]["debito"] += debe
+
+    if not sumas:
+        return
+
+    # Escribir encabezados en fila 8 (misma altura que encabezado tabla principal)
+    fila_enc = FILA_ENCABEZADO_MOV
+    encabezados = ["Concepto", "Suma Crédito", "Suma Débito"]
+    for i, titulo in enumerate(encabezados):
+        celda = hoja.cell(row=fila_enc, column=9 + i, value=titulo)  # cols I, J, K
+        celda.font = FUENTE_ENCABEZADO
+        celda.fill = RELLENO_ENCABEZADO
+        celda.alignment = ALINEACION_CENTRO
+        celda.border = BORDE_CUADRO
+
+    # Escribir filas de datos
+    fila = fila_enc + 1
+    for concepto, valores in sumas.items():
+        _escribir_fila(
+            hoja,
+            fila,
+            [
+                concepto,
+                valores["credito"] if valores["credito"] else None,
+                valores["debito"] if valores["debito"] else None,
+            ],
+            columna_base=9,  # columna I
+            formato_importe_idx={1, 2},  # J, K
+        )
+        for col in (10, 11):  # J, K
+            c = hoja.cell(row=fila, column=col)
+            c.number_format = FORMATO_IMPORTE
+            c.alignment = ALINEACION_DERECHA
+            c.border = BORDE_CUADRO
+        fila += 1
+
+    # Fila TOTAL
+    total_credito = sum(v["credito"] for v in sumas.values())
+    total_debito = sum(v["debito"] for v in sumas.values())
+    _escribir_fila(
+        hoja,
+        fila,
+        [
+            "TOTAL",
+            total_credito if total_credito else None,
+            total_debito if total_debito else None,
+        ],
+        columna_base=9,
+        formato_importe_idx={1, 2},
+    )
+    for col in (10, 11):  # J, K
+        c = hoja.cell(row=fila, column=col)
+        c.number_format = FORMATO_IMPORTE
+        c.alignment = ALINEACION_DERECHA
+        c.font = FUENTE_TITULO
+        c.border = BORDE_CUADRO
+
+
 # ----------------------------------------------------------------------
 # Hoja EXTRACTO BRUTO (opcional - solo si hay datos crudos)
 # ----------------------------------------------------------------------
+
 
 def _armar_extracto_bruto(hoja: Worksheet, datos_brutos: list[dict]) -> None:
     """Escribe el extracto completo tal cual (17 columnas)."""
@@ -426,6 +520,7 @@ def _armar_extracto_bruto(hoja: Worksheet, datos_brutos: list[dict]) -> None:
 # ----------------------------------------------------------------------
 # Punto de entrada
 # ----------------------------------------------------------------------
+
 
 def exportar(solicitud: SolicitudExportacion) -> bytes:
     """Devuelve el .xlsx del papel de trabajo, listo para mandarse como archivo."""
@@ -464,6 +559,7 @@ def exportar(solicitud: SolicitudExportacion) -> bytes:
 
         _armar_libro_mayor(mayor, solicitud, pendientes_xubio)
         _armar_movimientos_bancarios(movimientos, solicitud, pendientes_banco)
+        _armar_cuadro_subcategorias(movimientos, FILA_ENCABEZADO_MOV, solicitud.pendientes_banco)
 
         # Hoja extracto bruto si hay datos (opcional)
         if hasattr(solicitud, "extracto_bruto") and solicitud.extracto_bruto:

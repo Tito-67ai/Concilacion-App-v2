@@ -187,6 +187,12 @@ def _desde_dataframe(df, fuente: str = "El archivo") -> LecturaMayor:
         if fecha is None:
             sin_fecha += 1
 
+        # Extraer campos adicionales del webreport (DOCUMENTO, CUENTA, ORGANIZACION, DESCRIPCION)
+        documento = str(_columna(fila, "DOCUMENTO", "Documento") or "").strip() or None
+        cuenta = str(_columna(fila, "CUENTA", "Cuenta") or "").strip() or None
+        organizacion = str(_columna(fila, "ORGANIZACION", "Organizacion") or "").strip() or None
+        descripcion = str(_columna(fila, "DESCRIPCION", "Descripcion") or "").strip() or None
+
         movimientos.append(
             {
                 "fecha": fecha,
@@ -194,6 +200,10 @@ def _desde_dataframe(df, fuente: str = "El archivo") -> LecturaMayor:
                 "comprobante": comprobante,
                 "debe": debe,
                 "haber": haber,
+                "documento": documento,
+                "cuenta": cuenta,
+                "organizacion": organizacion,
+                "descripcion": descripcion,
             }
         )
 

@@ -169,9 +169,8 @@ class PendienteExport(BaseModel):
 class MovimientoMayorExport(BaseModel):
     """Una fila del Libro Mayor para la Tabla 1 del papel de trabajo.
 
-    Solo los campos que la estructura del formulario pide por nombre. El
-    resto de columnas del spec (Cuenta, Organizacion, Centro de Costos) van
-    vacias porque el pipeline todavia no las captura.
+    Campos del webreport de Xubio: fecha, concepto, comprobante, debe, haber,
+    documento, cuenta, organizacion, descripcion.
     """
 
     fecha: Optional[date] = None
@@ -179,6 +178,10 @@ class MovimientoMayorExport(BaseModel):
     comprobante: Optional[str] = None
     debe: float = 0.0
     haber: float = 0.0
+    documento: Optional[str] = None
+    cuenta: Optional[str] = None
+    organizacion: Optional[str] = None
+    descripcion: Optional[str] = None
 
     _fecha = field_validator("fecha", mode="before")(_normalizar_fecha)
 

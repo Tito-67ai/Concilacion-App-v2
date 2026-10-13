@@ -44,6 +44,11 @@ export interface MovimientoMayor {
   haber: number;
   /** Signo unificado del mayor: `debe - haber`, al reves que el banco. */
   importe?: number;
+  // Campos adicionales del webreport de Xubio
+  documento?: string | null;
+  cuenta?: string | null;
+  organizacion?: string | null;
+  descripcion?: string | null;
 }
 
 /** Lo que devuelve POST /conciliacion/mayor. */

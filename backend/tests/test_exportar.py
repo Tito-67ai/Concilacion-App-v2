@@ -45,6 +45,15 @@ def _payload(**cambios):
             {"origen": "banco", "fecha": "2026-07-03", "concepto": "COMISION", "debe": 150, "saldo": 350}
         ],
         "pendientes_xubio": [],
+        "movimientos_mayor": [
+            {"fecha": "2026-07-01", "comprobante": "FCA-1", "concepto": "Factura 1", "debe": 1000, "haber": 0}
+        ],
+        "movimientos_banco": [
+            {"fecha": "2026-07-01", "concepto": "COBRO", "haber": 1000, "saldo": 1000, "referencia": "REF-1"},
+            {"fecha": "2026-07-03", "concepto": "COMISION", "debe": 150, "saldo": 350, "referencia": "OP-9"},
+        ],
+        "saldo_inicial_mayor": 500,
+        "saldo_final_banco": 350,
     }
     base.update(cambios)
     return base
@@ -60,7 +69,8 @@ def test_devuelve_un_xlsx_que_se_puede_abrir():
 
     libro = openpyxl.load_workbook(io.BytesIO(respuesta.content))
     assert libro["Libro Mayor"]["B5"].value == "ACME S.A."
-    assert "COMISION" in _valores(libro["Libro Mayor"])
+    # COMISION esta en pendientes_banco -> aparece en Movimientos Bancarios (verde)
+    assert "COMISION" in _valores(libro["Movimientos Bancarios"])
 
 
 def test_manda_el_nombre_del_archivo_para_que_el_navegador_lo_baje():
@@ -78,7 +88,7 @@ def test_manda_el_nombre_del_archivo_para_que_el_navegador_lo_baje():
 def test_una_conciliacion_vacia_da_400_y_no_un_archivo_vacio():
     respuesta = client.post(
         "/api/exportar/conciliacion",
-        json=_payload(conciliados=[], pendientes_banco=[], pendientes_xubio=[]),
+        json=_payload(conciliados=[], pendientes_banco=[], pendientes_xubio=[], movimientos_mayor=[], movimientos_banco=[]),
     )
 
     assert respuesta.status_code == 400
@@ -133,7 +143,7 @@ def test_una_fecha_en_formato_argentino_se_acepta():
 
     assert respuesta.status_code == 200
     libro = openpyxl.load_workbook(io.BytesIO(respuesta.content))
-    assert "COMISION" in _valores(libro["Libro Mayor"])
+    assert "COMISION" in _valores(libro["Movimientos Bancarios"])
 
 
 def test_el_ruta_esta_registrada_en_el_documento():

@@ -4,7 +4,7 @@ import { Component, OnDestroy, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { Subscription, timeout } from 'rxjs';
 
-import { ImportacionService, MovimientoImportado } from '../../servicios/importacion.service';
+import { ImportacionService, MovimientoExtraido } from '../../servicios/importacion.service';
 
 const API = 'http://127.0.0.1:8000/api';
 
@@ -29,7 +29,7 @@ interface PasoProceso {
  * normalizados y, si el 200 viene sin filas, el motivo que manda el extractor.
  */
 interface RespuestaProcesar {
-  datos?: MovimientoImportado[];
+  datos?: MovimientoExtraido[];
   detail?: string;
 }
 

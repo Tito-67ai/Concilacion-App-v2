@@ -21,6 +21,13 @@ export interface MovimientoImportado {
 }
 
 /**
+ * Un movimiento recien salido del extractor: igual que MovimientoImportado pero
+ * sin `id`. El backend no manda el id; lo genera el servicio al guardarlo y es
+ * lo que el *ngFor usa para trackear.
+ */
+export type MovimientoExtraido = Omit<MovimientoImportado, 'id'>;
+
+/**
  * Estado compartido del flujo de importacion.
  *
  * Antes el importador vivia entero dentro de conciliacion y no hacia falta
@@ -148,7 +155,7 @@ export class ImportacionService {
    * ninguna categoria, y en los movimientos importados puede venir ausente: se
    * deja tal cual y la pantalla lo lee con optional chaining.
    */
-  setMovimientos(movimientos: MovimientoImportado[]): void {
+  setMovimientos(movimientos: MovimientoExtraido[]): void {
     const conId = this.recalcularSaldos(
       movimientos.map((mov) => ({ ...mov, id: `mov-${this.contadorId++}` })),
     );

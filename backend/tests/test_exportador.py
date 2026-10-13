@@ -19,6 +19,10 @@ from app.models.schemas import SolicitudExportacion
 from app.services import exportador
 
 
+# El formato contable del formulario: miles con separador y el cero como "-".
+FORMATO_CONTABLE = '_ * #,##0.00_ ;_ * \\-#,##0.00_ ;_ * "-"??_ ;_ @_ '
+
+
 def _libro(contenido: bytes):
     return openpyxl.load_workbook(io.BytesIO(contenido))
 
@@ -236,15 +240,15 @@ def test_la_tabla3_va_despues_de_la_tabla2():
 # ----------------------------------------------------------------------
 
 
-def test_el_pie_compara_el_saldo_del_banco_con_el_del_mayor():
+def test_el_pie_compara_el_saldo_ajustado_con_el_del_extracto():
     hoja = _mayor(exportador.exportar(_solicitud()))
 
-    assert hoja["A21"].value == "Saldo final según Mayor"
+    assert hoja["A21"].value == "Saldo Ajustado"
     assert hoja["F21"].value == "=F11"  # ultimo saldo de la Tabla 1
-    assert hoja["A22"].value == "Saldo final según Banco"
+    assert hoja["A22"].value == "Saldo según Extracto"
     assert hoja["F22"].value == 850
     assert hoja["A23"].value == "Control de diferencia"
-    assert hoja["F23"].value == "=F22-F21"
+    assert hoja["F23"].value == "=F21-F22"
 
 
 # ----------------------------------------------------------------------
@@ -313,17 +317,17 @@ def test_la_hoja_de_movimientos_cierra_contra_el_mayor():
 # ----------------------------------------------------------------------
 
 
-def test_los_importes_tienen_formato_de_dos_decimales():
+def test_los_importes_tienen_formato_contable_de_dos_decimales():
     hoja = _mayor(exportador.exportar(_solicitud()))
 
     for coordenada in ("D10", "E10", "F10", "F22"):
-        assert hoja[coordenada].number_format == "#,##0.00"
+        assert hoja[coordenada].number_format == FORMATO_CONTABLE
 
 
-def test_las_fechas_van_en_formato_iso():
+def test_las_fechas_van_en_formato_dd_mm_yyyy():
     hoja = _mayor(exportador.exportar(_solicitud()))
 
-    assert hoja["A10"].number_format == "yyyy-mm-dd"
+    assert hoja["A10"].number_format == "dd/mm/yyyy"
 
 
 def test_los_encabezados_quedan_resaltados():
@@ -334,6 +338,51 @@ def test_los_encabezados_quedan_resaltados():
     assert hoja["A5"].fill.fgColor.rgb == "FF00B0F0"
     assert hoja["A8"].fill.fgColor.rgb == "FF00B0F0"
     assert hoja["A8"].font.bold
+
+
+def test_los_importes_conciliados_del_mayor_van_en_amarillo():
+    hoja = _mayor(exportador.exportar(_solicitud()))
+
+    # Las dos filas del mayor cruzaron: los pendientes de Xubio son otra fila.
+    for coordenada in ("D10", "E10", "D11", "E11"):
+        assert hoja[coordenada].fill.fgColor.rgb == "FFFFFF00"
+    # La fila de Saldo Inicial no es un movimiento que cruce: no se pinta.
+    assert hoja["D9"].fill.patternType is None
+    assert hoja["E9"].fill.patternType is None
+
+
+def test_una_fila_del_mayor_sin_cruzar_no_se_pinta():
+    hoja = _mayor(
+        exportador.exportar(
+            _solicitud(
+                pendientes_xubio=[
+                    {
+                        "origen": "xubio",
+                        "fecha": "2026-07-02",
+                        "comprobante": "FCA-1",
+                        "concepto": "Factura 1",
+                        "debe": 1000,
+                    }
+                ]
+            )
+        )
+    )
+
+    # FCA-1 (fila 10) esta en los pendientes: no se pinta. La fila 11 si.
+    assert hoja["D10"].fill.patternType is None
+    assert hoja["E10"].fill.patternType is None
+    assert hoja["D11"].fill.fgColor.rgb == "FFFFFF00"
+
+
+def test_la_hoja_de_movimientos_pinta_conciliados_y_pendientes():
+    hoja = _movimientos(exportador.exportar(_solicitud()))
+
+    # COBRO (fila 9) cruzo: amarillo. COMISION (fila 10) es un debito pendiente
+    # de registracion contable: rosado.
+    assert hoja["D9"].fill.fgColor.rgb == "FFFFFF00"
+    assert hoja["E9"].fill.fgColor.rgb == "FFFFFF00"
+    assert hoja["D10"].fill.fgColor.rgb == "FFD5A6BD"
+    assert hoja["E10"].fill.fgColor.rgb == "FFD5A6BD"
 
 
 def test_las_columnas_de_importe_entran_los_numeros_y_no_quedan_en_piquitos():
@@ -353,7 +402,7 @@ def test_las_columnas_de_importe_entran_los_numeros_y_no_quedan_en_piquitos():
         (_movimientos(contenido), ("D9", "E9", "F10")),
     ):
         for coordenada in coordenadas:
-            assert hoja[coordenada].number_format == "#,##0.00"
+            assert hoja[coordenada].number_format == FORMATO_CONTABLE
             assert hoja[coordenada].alignment.shrink_to_fit is True
             assert hoja[coordenada].alignment.horizontal == "right"
 
@@ -380,7 +429,7 @@ def test_una_conciliacion_vacia_no_falla():
     assert hoja["G9"].value == "Saldo Inicial"
     assert hoja["F9"].value == 0
     # Sin filas no hay control final con formula, pero el pie queda igual.
-    assert hoja["A17"].value == "Saldo final según Mayor"
+    assert hoja["A17"].value == "Saldo Ajustado"
 
 
 def test_muchas_filas_no_se_pisan_entre_secciones():

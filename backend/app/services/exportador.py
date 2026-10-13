@@ -11,12 +11,15 @@ Estructura (hoja "Libro Mayor"):
                 no sono en el extracto).
     ...         Tabla 3 "Partidas en banco pendientes de registracion contable."
                 (extracto que no esta en el mayor).
-    ...         Pie: saldo final segun mayor, saldo final segun banco y el
-                control de diferencia `=F(banco)-F(mayor)`.
+    ...         Pie: saldo ajustado, saldo según extracto y el control de
+                diferencia `=F(ajustado)-F(extracto)`.
 
 Hoja "Movimientos Bancarios": el extracto completo en una sola tabla de 17
 columnas (A-Q) que arranca en la fila 8, con el saldo acumulado por formula
 `=F(anterior)+E-D` y una fila de control contra el mayor al final.
+
+Los importes que cruzaron van en amarillo y los debitos del banco pendientes de
+registracion contable, en rosado (colores del punto 4 del formulario).
 
 La plantilla (assets/plantillas/FO 02-03 Conciliación Bancaria.xlsx) aporta solo
 el membrete: el formulario, su codigo, el titulo y las etiquetas azules son de
@@ -27,6 +30,7 @@ modulo. La plantilla se regenera con scripts/generar_plantilla_fo_02_03.py.
 from __future__ import annotations
 
 import io
+from collections import Counter
 from datetime import date, datetime
 from pathlib import Path
 
@@ -46,10 +50,12 @@ NOMBRE_PLANTILLA = "FO 02-03 Conciliación Bancaria.xlsx"
 HOJA_MAYOR = "Libro Mayor"
 HOJA_MOVIMIENTOS = "Movimientos Bancarios"
 
-# El formato del spec: miles con coma, dos decimales. El de la plantilla era el
-# contable con guion para el cero; el spec pide este.
-FORMATO_IMPORTE = "#,##0.00"
-FORMATO_FECHA = "yyyy-mm-dd"
+# Formatos del formulario. El numero usa el contable heredado de la plantilla
+# (el cero se ve "-") y las fechas van dd/mm/yyyy. La celda del periodo es la
+# excepcion: el spec la pide en AAAA-MM-DD.
+FORMATO_IMPORTE = '_ * #,##0.00_ ;_ * \\-#,##0.00_ ;_ * "-"??_ ;_ @_ '
+FORMATO_FECHA = "dd/mm/yyyy"
+FORMATO_PERIODO = "yyyy-mm-dd"
 
 # ----------------------------------------------------------------------
 # Layout
@@ -152,6 +158,10 @@ ANCHOS_MOVIMIENTOS = {
 # El alpha va FF (opaco): el mismo azul de las etiquetas "Empresa:" de la
 # plantilla. Con alpha 00 Excel pinta el relleno como transparente.
 RELLENO_ENCABEZADO = PatternFill("solid", fgColor="FF00B0F0")
+# Colores del spec: amarillo para los importes que cruzaron y rosado para los
+# debitos del banco que quedaron pendientes de registracion contable.
+RELLENO_CONCILIADO = PatternFill("solid", fgColor="FFFFFF00")
+RELLENO_PENDIENTE_BANCO = PatternFill("solid", fgColor="FFD5A6BD")
 FUENTE_ENCABEZADO = Font(name="Calibri", size=11, bold=True)
 FUENTE_TITULO_SECCION = Font(name="Calibri", size=11, bold=True)
 # shrink_to_fit: red de seguridad. Si un importe supera el ancho de la
@@ -216,6 +226,37 @@ def _saldo_final_banco(solicitud: SolicitudExportacion) -> float:
     if solicitud.movimientos_banco:
         return _importe(solicitud.movimientos_banco[-1].saldo)
     return 0.0
+
+
+# ----------------------------------------------------------------------
+# Identidad de filas (para pintar conciliados y pendientes)
+# ----------------------------------------------------------------------
+#
+# El export no recibe el detalle de que fila se cruzo con cual: solo el mayor y
+# el extracto completos y las dos bandejas de pendientes. Como los pendientes
+# son las filas que NO cruzaron, una fila del listado completo que no aparece
+# en su bandeja de pendientes es una fila conciliada. Se comparan por una clave
+# de negocio (fecha + concepto + importes) porque los objetos del cruce llegan
+# rearmados y no son los mismos que los del listado original.
+
+
+def _clave_banco(fecha, concepto, debe, haber) -> tuple:
+    return (_fecha(fecha), (concepto or "").strip(), _importe(debe), _importe(haber))
+
+
+def _clave_mayor(fecha, concepto, comprobante, debe, haber) -> tuple:
+    return (
+        _fecha(fecha),
+        (concepto or "").strip(),
+        (comprobante or "").strip(),
+        _importe(debe),
+        _importe(haber),
+    )
+
+
+def _pintar(hoja: Worksheet, fila: int, columnas, relleno) -> None:
+    for columna in columnas:
+        hoja.cell(row=fila, column=columna).fill = relleno
 
 
 # ----------------------------------------------------------------------
@@ -294,7 +335,7 @@ def _escribir_membrete(hoja: Worksheet, encabezado: EncabezadoConciliacion) -> N
     periodo = _periodo_a_fecha(encabezado.periodo)
     if periodo is not None:
         hoja["I5"] = periodo
-        hoja["I5"].number_format = FORMATO_FECHA
+        hoja["I5"].number_format = FORMATO_PERIODO
         hoja["I5"].alignment = ALINEACION_CENTRO
     elif encabezado.periodo:
         hoja["I5"] = encabezado.periodo
@@ -308,7 +349,7 @@ def _restaurar_formulas_del_membrete(hoja: Worksheet) -> None:
     hoja["I6"] = "=+'Libro Mayor'!I6"
     # La plantilla traia 'mmm-yy' en esta celda; el membrete de las dos hojas
     # tiene que verse igual.
-    hoja["I5"].number_format = FORMATO_FECHA
+    hoja["I5"].number_format = FORMATO_PERIODO
     hoja["I5"].alignment = ALINEACION_CENTRO
 
 
@@ -318,9 +359,13 @@ def _restaurar_formulas_del_membrete(hoja: Worksheet) -> None:
 
 
 def _armar_tabla_mayor(
-    hoja: Worksheet, solicitud: SolicitudExportacion
+    hoja: Worksheet, solicitud: SolicitudExportacion, pendientes: Counter
 ) -> tuple[int, str]:
-    """Tabla 1 completa. Devuelve (fila libre, celda del ultimo saldo)."""
+    """Tabla 1 completa. Devuelve (fila libre, celda del ultimo saldo).
+
+    `pendientes` es el multiset de claves de las filas de Xubio que quedaron sin
+    cruzar; cada fila del mayor que no esta ahi se pinta de amarillo (cruzada).
+    """
     _escribir_encabezados(hoja, FILA_ENCABEZADO_TABLA1, COLUMNAS_TABLA1)
 
     fila = FILA_ENCABEZADO_TABLA1 + 1
@@ -332,6 +377,16 @@ def _armar_tabla_mayor(
     fila += 1
 
     for movimiento in solicitud.movimientos_mayor:
+        clave = _clave_mayor(
+            movimiento.fecha,
+            movimiento.concepto,
+            movimiento.comprobante,
+            movimiento.debe,
+            movimiento.haber,
+        )
+        es_pendiente = pendientes[clave] > 0
+        if es_pendiente:
+            pendientes[clave] -= 1
         _escribir_fila(
             hoja,
             fila,
@@ -349,6 +404,9 @@ def _armar_tabla_mayor(
             centradas={1, 2},
         )
         _celda_formula(hoja, fila, 6, f"=F{fila - 1}+D{fila}-E{fila}")
+        # La fila que no esta en pendientes cruzo: importes en amarillo.
+        if not es_pendiente and _importe(movimiento.debe or movimiento.haber):
+            _pintar(hoja, fila, (4, 5), RELLENO_CONCILIADO)
         celda_ultimo_saldo = f"F{fila}"
         fila += 1
 
@@ -428,25 +486,24 @@ def _armar_pie_de_control(
     solicitud: SolicitudExportacion,
     celda_saldo_mayor: str,
 ) -> None:
-    """Saldo final del mayor, saldo final del banco y el control de cierre.
+    """Saldo ajustado, saldo del extracto y el control de cierre.
 
-    La formula del control es `=F(penultima)-F(anteultima)`, tal como la pide
-    el formulario: diferencia entre el saldo que informa el banco y el saldo
-    contable. Cero es el cierre.
+    La formula del control es `=F(saldo ajustado)-F(saldo extracto)`, como la
+    pide el formulario: con la conciliacion bien hecha da 0.
     """
     fila = fila_inicio + 1
-    _titulo_seccion(hoja, fila, "Saldo final según Mayor")
+    _titulo_seccion(hoja, fila, "Saldo Ajustado")
     _celda_formula(hoja, fila, 6, f"={celda_saldo_mayor}")
-    fila_saldo_mayor = fila
+    fila_ajustado = fila
     fila += 1
 
-    _titulo_seccion(hoja, fila, "Saldo final según Banco")
+    _titulo_seccion(hoja, fila, "Saldo según Extracto")
     _celda_importe(hoja, fila, 6, _saldo_final_banco(solicitud))
-    fila_saldo_banco = fila
+    fila_extracto = fila
     fila += 1
 
     _titulo_seccion(hoja, fila, "Control de diferencia")
-    _celda_formula(hoja, fila, 6, f"=F{fila_saldo_banco}-F{fila_saldo_mayor}")
+    _celda_formula(hoja, fila, 6, f"=F{fila_ajustado}-F{fila_extracto}")
 
 
 # ----------------------------------------------------------------------
@@ -455,13 +512,25 @@ def _armar_pie_de_control(
 
 
 def _armar_movimientos(
-    hoja: Worksheet, solicitud: SolicitudExportacion, celda_saldo_mayor: str
+    hoja: Worksheet,
+    solicitud: SolicitudExportacion,
+    celda_saldo_mayor: str,
+    pendientes: Counter,
 ) -> None:
     _escribir_encabezados(hoja, FILA_ENCABEZADO_MOVIMIENTOS, COLUMNAS_MOVIMIENTOS)
 
     fila = FILA_ENCABEZADO_MOVIMIENTOS + 1
     primer_dato = fila
     for movimiento in solicitud.movimientos_banco:
+        clave = _clave_banco(
+            movimiento.fecha,
+            movimiento.concepto,
+            movimiento.debe,
+            movimiento.haber,
+        )
+        es_pendiente = pendientes[clave] > 0
+        if es_pendiente:
+            pendientes[clave] -= 1
         _escribir_fila(
             hoja,
             fila,
@@ -494,6 +563,15 @@ def _armar_movimientos(
         else:
             formula = f"=F{fila - 1}+E{fila}-D{fila}"
         _celda_formula(hoja, fila, 6, formula)
+        debe = _importe(movimiento.debe)
+        haber = _importe(movimiento.haber)
+        if es_pendiente:
+            # Los debitos del banco pendientes de registracion van en rosado.
+            if debe:
+                _pintar(hoja, fila, (4, 5), RELLENO_PENDIENTE_BANCO)
+        elif debe or haber:
+            # Cruzo contra el mayor: importes en amarillo.
+            _pintar(hoja, fila, (4, 5), RELLENO_CONCILIADO)
         fila += 1
 
     if fila > primer_dato:
@@ -521,12 +599,23 @@ def exportar(solicitud: SolicitudExportacion) -> bytes:
         _anchos(movimientos, ANCHOS_MOVIMIENTOS)
         _escribir_membrete(mayor, solicitud.encabezado)
 
-        fila, celda_saldo_mayor = _armar_tabla_mayor(mayor, solicitud)
+        # Multisets de las filas que quedaron sin cruzar. Cada tabla las consume
+        # a medida que las usa, asi que las dos hojas trabajan sobre su copia.
+        pendientes_xubio = Counter(
+            _clave_mayor(p.fecha, p.concepto, p.comprobante, p.debe, p.haber)
+            for p in solicitud.pendientes_xubio
+        )
+        pendientes_banco = Counter(
+            _clave_banco(p.fecha, p.concepto, p.debe, p.haber)
+            for p in solicitud.pendientes_banco
+        )
+
+        fila, celda_saldo_mayor = _armar_tabla_mayor(mayor, solicitud, pendientes_xubio)
         fila = _armar_tabla_pendientes_contables(mayor, fila, solicitud.pendientes_xubio)
         fila = _armar_tabla_pendientes_banco(mayor, fila, solicitud.pendientes_banco)
         _armar_pie_de_control(mayor, fila, solicitud, celda_saldo_mayor)
 
-        _armar_movimientos(movimientos, solicitud, celda_saldo_mayor)
+        _armar_movimientos(movimientos, solicitud, celda_saldo_mayor, pendientes_banco)
         _restaurar_formulas_del_membrete(movimientos)
 
         destino = io.BytesIO()

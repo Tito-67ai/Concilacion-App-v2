@@ -67,7 +67,11 @@ export interface ParConciliado {
   debe: number;
   haber: number;
   saldo: number;
-  importe: number;
+  /**
+   * Opcional porque el cruce no siempre lo manda (el par manual lo arma desde
+   * el banco): si falta, el exportador lo recalcula desde debe/haber.
+   */
+  importe?: number;
   /**
    * El cruce guarda estos dos del lado de Xubio, que es el que muestra la
    * bandeja derecha: el comprobante del mayor y su importe unificado
@@ -104,4 +108,79 @@ export interface SolicitudExportacion {
   pendientes_banco: MovimientoBanco[];
   pendientes_xubio: MovimientoMayor[];
   encabezado: EncabezadoConciliacion;
+}
+
+/** Un cliente/afiliado de Xubio, tal como lo devuelve GET /xubio/afiliados. */
+export interface Afiliado {
+  id: number;
+  organizacionId: number;
+  organizacionNombre: string;
+  cuit: string | null;
+  categoriaFiscal: string | null;
+  activo: number;
+  esProveedor: number;
+}
+
+/**
+ * Una entrada de /xubio/cruzar-afiliados o /xubio/clasificar-mayor.
+ *
+ * Llega una por movimiento, en el mismo orden, para poder superponerla a la
+ * tabla sin buscar: `datos[i]` es el afiliado de `movimientos[i]`.
+ */
+export interface CruceAfiliadoMovimiento {
+  indice: number;
+  afiliado: Afiliado | null;
+  metodo: string | null;
+}
+
+/** Una fila de la tabla de afiliados: el afiliado y cuantos movimientos son suyos. */
+export interface AfiliadoConConciliaciones {
+  afiliado: Afiliado;
+  movimientos: number;
+}
+
+/** Lo que devuelve GET /extractos/bancos. */
+export interface RespuestaBancos {
+  bancos: string[];
+  formatos: string[];
+}
+
+/** Lo que devuelve GET /xubio/afiliados. */
+export interface RespuestaAfiliados {
+  exito: boolean;
+  cantidad: number;
+  datos: Afiliado[];
+}
+
+/** Lo que devuelven /xubio/cruzar-afiliados y /xubio/clasificar-mayor. */
+export interface RespuestaCruceAfiliados {
+  exito: boolean;
+  resumen: Record<string, unknown>;
+  datos: CruceAfiliadoMovimiento[];
+}
+
+/** Las tres bandejas que devuelve el cruce. */
+export interface TablasCruce {
+  conciliados: ParConciliado[];
+  pendientes_banco: MovimientoBanco[];
+  pendientes_xubio: MovimientoMayor[];
+}
+
+/** Lo que devuelven POST /conciliacion/cruzar y POST /xubio/cruzar-datos. */
+export interface RespuestaCruce {
+  exito: boolean;
+  resumen: Record<string, unknown>;
+  tablas: TablasCruce;
+}
+
+/** Lo que devuelve POST /extractos/procesar. */
+export interface RespuestaExtraccion {
+  exito: boolean;
+  banco: string;
+  /** 'pdf' o 'tabla'. Opcional: un backend viejo no lo manda. */
+  origen?: string | null;
+  /** Que extractor leyo el archivo (queda 'GENERICO' si entro el de rescate). */
+  motor?: string | null;
+  cantidad_movimientos: number;
+  datos: MovimientoBanco[];
 }

@@ -11,6 +11,7 @@ import { Component, ElementRef, inject, signal, viewChild } from '@angular/core'
 import { Router } from '@angular/router';
 
 import { ImportacionService } from '../../servicios/importacion.service';
+import { RespuestaBancos } from '../../modelos/conciliacion';
 
 const API = 'http://127.0.0.1:8000/api';
 
@@ -114,8 +115,8 @@ export class ImportarPdfComponent {
   }
 
   private cargarBancos(): void {
-    this.http.get(`${API}/extractos/bancos`).subscribe({
-      next: (respuesta: any) => {
+    this.http.get<RespuestaBancos>(`${API}/extractos/bancos`).subscribe({
+      next: (respuesta) => {
         const bancos: string[] = respuesta?.bancos ?? [];
         this.bancos.set(bancos);
         // Se preselecciona el primero: preguntar algo que no cambia el

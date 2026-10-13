@@ -87,11 +87,11 @@ export class ExportacionService {
    * generar el Excel" cuando el backend si sabia decir "no hay nada
    * conciliado". Por eso es asincrono y abre el blob antes de decidir.
    */
-  async mensajeDeError(error: any): Promise<string> {
-    const mensaje = this.mensajeDeDetalle(error?.error);
+  async mensajeDeError(error: unknown): Promise<string> {
+    const cuerpo = (error as { error?: unknown } | null)?.error;
+    const mensaje = this.mensajeDeDetalle(cuerpo);
     if (mensaje) return mensaje;
 
-    const cuerpo = error?.error;
     if (cuerpo instanceof Blob) {
       const mensajeDelBlob = this.mensajeDeDetalle(await this.jsonDe(cuerpo));
       if (mensajeDelBlob) return mensajeDelBlob;
@@ -107,7 +107,7 @@ export class ExportacionService {
     const detalle = (cuerpo as { detail?: unknown })?.detail;
     if (typeof detalle === 'string' && detalle.trim()) return detalle;
     if (Array.isArray(detalle) && detalle.length > 0) {
-      return detalle.map((d: any) => d?.msg ?? JSON.stringify(d)).join('; ');
+      return detalle.map((d: unknown) => (d as { msg?: string })?.msg ?? JSON.stringify(d)).join('; ');
     }
     return null;
   }

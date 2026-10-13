@@ -5,16 +5,24 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { catchError, throwError, timeout } from 'rxjs';
 
 import { ImportarMenuComponent } from '../../componentes/importar-menu/importar-menu';
 import {
+  Afiliado,
+  AfiliadoConConciliaciones,
+  CruceAfiliadoMovimiento,
   MovimientoBanco,
   MovimientoMayor,
   ParConciliado,
+  RespuestaAfiliados,
+  RespuestaBancos,
+  RespuestaCruce,
+  RespuestaCruceAfiliados,
+  RespuestaExtraccion,
   RespuestaMayor,
   SolicitudExportacion,
 } from '../../modelos/conciliacion';
@@ -45,6 +53,18 @@ const CORREO_SOPORTE = '';
 // banco sobre otra del banco.
 export type LadoConciliable = 'banco' | 'xubio';
 
+/** Una fila que se puede arrastrar: sale de cualquiera de las dos bandejas. */
+type FilaConciliable = MovimientoBanco | MovimientoMayor;
+
+/**
+ * Una fila del lado de Xubio tal como la muestra la pantalla.
+ *
+ * Ademas de las columnas del mayor, un par conciliado guarda aparte el importe
+ * unificado del lado de Xubio (importe_xubio): el `importe` del par es el del
+ * banco. Los pendientes ya traen el suyo unificado.
+ */
+type FilaXubio = MovimientoMayor & { importe_xubio?: number };
+
 @Component({
   selector: 'app-conciliacion',
   standalone: true,
@@ -72,9 +92,9 @@ export class ConciliacionComponent implements OnInit {
     this.cdr.markForCheck();
   }
 
-  private _movimientosBanco: any[] = [];
-  get movimientosBanco(): any[] { return this._movimientosBanco; }
-  set movimientosBanco(valor: any[]) { this._movimientosBanco = valor; this.notificar(); }
+  private _movimientosBanco: MovimientoBanco[] = [];
+  get movimientosBanco(): MovimientoBanco[] { return this._movimientosBanco; }
+  set movimientosBanco(valor: MovimientoBanco[]) { this._movimientosBanco = valor; this.notificar(); }
 
   private _archivoSeleccionado: File | null = null;
   get archivoSeleccionado(): File | null { return this._archivoSeleccionado; }
@@ -168,9 +188,9 @@ export class ConciliacionComponent implements OnInit {
   // sin inventar datos: el panel se queda con el motivo y un boton para
   // reintentar.
   // ------------------------------------------------------------------
-  private _afiliados: any[] = [];
-  get afiliados(): any[] { return this._afiliados; }
-  set afiliados(valor: any[]) { this._afiliados = valor; this.notificar(); }
+  private _afiliados: Afiliado[] = [];
+  get afiliados(): Afiliado[] { return this._afiliados; }
+  set afiliados(valor: Afiliado[]) { this._afiliados = valor; this.notificar(); }
 
   private _cargandoAfiliados: boolean = false;
   get cargandoAfiliados(): boolean { return this._cargandoAfiliados; }
@@ -182,9 +202,9 @@ export class ConciliacionComponent implements OnInit {
   // Una entrada por movimiento del banco, alineada con movimientosBanco
   // (cruceConAfiliados[i] corresponde a movimientosBanco[i]). La arma el
   // backend entre los afiliados ya descargados, sin volver a la web de Xubio.
-  private _cruceConAfiliados: any[] = [];
-  get cruceConAfiliados(): any[] { return this._cruceConAfiliados; }
-  set cruceConAfiliados(valor: any[]) { this._cruceConAfiliados = valor; this.notificar(); }
+  private _cruceConAfiliados: CruceAfiliadoMovimiento[] = [];
+  get cruceConAfiliados(): CruceAfiliadoMovimiento[] { return this._cruceConAfiliados; }
+  set cruceConAfiliados(valor: CruceAfiliadoMovimiento[]) { this._cruceConAfiliados = valor; this.notificar(); }
 
   // Login de Xubio desde la pantalla. Sin XUBIO_WEB_TOKEN/COOKIE el backend
   // responde 503 y el panel derecho ofrece un formulario de email + contrasena:
@@ -236,9 +256,9 @@ export class ConciliacionComponent implements OnInit {
   // (clasificacionFilasXubio[i] corresponde a filasXubio[i]). Si la respuesta
   // llega cuando la bandeja ya cambio (un par manual en el medio), el getter
   // filasXubioFiltradas la descarta por desalineada y muestra todo.
-  private _clasificacionFilasXubio: any[] = [];
-  get clasificacionFilasXubio(): any[] { return this._clasificacionFilasXubio; }
-  set clasificacionFilasXubio(valor: any[]) { this._clasificacionFilasXubio = valor; this.notificar(); }
+  private _clasificacionFilasXubio: CruceAfiliadoMovimiento[] = [];
+  get clasificacionFilasXubio(): CruceAfiliadoMovimiento[] { return this._clasificacionFilasXubio; }
+  set clasificacionFilasXubio(valor: CruceAfiliadoMovimiento[]) { this._clasificacionFilasXubio = valor; this.notificar(); }
 
   /** '' = todas las empresas, o el id del afiliado seleccionado. */
   private _empresaFiltro: number | '' = '';
@@ -306,9 +326,9 @@ export class ConciliacionComponent implements OnInit {
 
   // La fila que se esta arrastrando, y de que lado salio. Sin esto el drop no
   // sabe que fila se solto: el evento de drop no lo dice.
-  private _filaArrastrada: any = null;
-  get filaArrastrada(): any { return this._filaArrastrada; }
-  set filaArrastrada(valor: any) { this._filaArrastrada = valor; this.notificar(); }
+  private _filaArrastrada: FilaConciliable | null = null;
+  get filaArrastrada(): FilaConciliable | null { return this._filaArrastrada; }
+  set filaArrastrada(valor: FilaConciliable | null) { this._filaArrastrada = valor; this.notificar(); }
 
   private _ladoArrastrado: LadoConciliable | null = null;
   get ladoArrastrado(): LadoConciliable | null { return this._ladoArrastrado; }
@@ -316,15 +336,15 @@ export class ConciliacionComponent implements OnInit {
 
   // La fila sobre la que esta el puntero ahora, para pintar el destino. Es
   // distinta de filaArrastrada: una es la que se mueve, esta es la que recibe.
-  private _filaDestino: any = null;
-  get filaDestino(): any { return this._filaDestino; }
-  set filaDestino(valor: any) { this._filaDestino = valor; this.notificar(); }
+  private _filaDestino: FilaConciliable | null = null;
+  get filaDestino(): FilaConciliable | null { return this._filaDestino; }
+  set filaDestino(valor: FilaConciliable | null) { this._filaDestino = valor; this.notificar(); }
 
   // Ultimo par manual, para poder deshacerlo. Emparejar a mano se equivoca
   // seguido y sin vuelta atras el error queda en la bandeja para siempre.
-  private _ultimoPareoManual: { banco: any; xubio: any } | null = null;
-  get ultimoPareoManual(): { banco: any; xubio: any } | null { return this._ultimoPareoManual; }
-  set ultimoPareoManual(valor: { banco: any; xubio: any } | null) { this._ultimoPareoManual = valor; this.notificar(); }
+  private _ultimoPareoManual: { banco: MovimientoBanco; xubio: MovimientoMayor } | null = null;
+  get ultimoPareoManual(): { banco: MovimientoBanco; xubio: MovimientoMayor } | null { return this._ultimoPareoManual; }
+  set ultimoPareoManual(valor: { banco: MovimientoBanco; xubio: MovimientoMayor } | null) { this._ultimoPareoManual = valor; this.notificar(); }
 
   /**
    * Solo se arrastra despues de un cruce y mientras se mire la bandeja de
@@ -339,13 +359,13 @@ export class ConciliacionComponent implements OnInit {
    * Un destino valido es la fila pendiente del lado contrario. Una fila del
    * lado del arrastre no es destino: no tiene sentido emparejar banco con banco.
    */
-  puedeRecibir(mov: any, lado: LadoConciliable): boolean {
+  puedeRecibir(mov: FilaConciliable, lado: LadoConciliable): boolean {
     if (!this.filaArrastrada || !this.puedeArrastrar) return false;
     return this.ladoArrastrado !== lado;
   }
 
   /** El puntero entro en una fila: se marca como destino. */
-  alArrastrarSobreFila(mov: any, lado: LadoConciliable, event: DragEvent) {
+  alArrastrarSobreFila(mov: FilaConciliable, lado: LadoConciliable, event: DragEvent) {
     if (!this.puedeRecibir(mov, lado)) return;
     // Sin preventDefault el navegador no deja soltar aca. Ademas el drop es
     // bloqueado: no se quiere arrastrar archivos del escritorio a una fila.
@@ -364,7 +384,7 @@ export class ConciliacionComponent implements OnInit {
   }
 
   /** Empieza el arrastre de una fila del lado indicado. */
-  alArrastrarFila(mov: any, lado: LadoConciliable, event: DragEvent) {
+  alArrastrarFila(mov: FilaConciliable, lado: LadoConciliable, event: DragEvent) {
     if (!this.puedeArrastrar) return;
 
     event.preventDefault();
@@ -380,7 +400,7 @@ export class ConciliacionComponent implements OnInit {
   }
 
   /** Se solto una fila sobre otra. Empareja las dos y saca ambas de pendientes. */
-  alSoltarSobreFila(destino: any, ladoDestino: LadoConciliable, event: DragEvent) {
+  alSoltarSobreFila(destino: FilaConciliable, ladoDestino: LadoConciliable, event: DragEvent) {
     event.preventDefault();
     event.stopPropagation();
 
@@ -401,9 +421,11 @@ export class ConciliacionComponent implements OnInit {
 
     if (!esValido) return;
 
-    // El que se arrastro puede venir de cualquiera de los dos lados.
-    const movBanco = ladoOrigen === 'banco' ? origen : destino;
-    const movXubio = ladoOrigen === 'xubio' ? origen : destino;
+    // origen y destino son FilaConciliable (union de las dos bandejas). Como
+    // ladoOrigen !== ladoDestino, uno es del banco y el otro del mayor; los tipos
+    // no lo saben, pero emparejar valida con includes() antes de usarlos.
+    const movBanco = (ladoOrigen === 'banco' ? origen : destino) as MovimientoBanco;
+    const movXubio = (ladoOrigen === 'xubio' ? origen : destino) as MovimientoMayor;
 
     this.emparejar(movBanco, movXubio);
   }
@@ -424,7 +446,7 @@ export class ConciliacionComponent implements OnInit {
    * que monto. Sin eso, un par con 200 de diferencia queda igual que uno
    * perfecto y nadie lo vuelve a mirar.
    */
-  emparejar(movBanco: any, movXubio: any) {
+  emparejar(movBanco: MovimientoBanco, movXubio: MovimientoMayor) {
     const diferencia = this.diferenciaDeImporte(movBanco, movXubio);
 
     const existeBanco = this.pendientesBanco.includes(movBanco);
@@ -494,7 +516,7 @@ export class ConciliacionComponent implements OnInit {
    * separado no son comparables (un ingreso del banco es un DEBE del Xubio, y
    * viceversa), y eso ya lo tiene en cuenta el backend al unificar el signo.
    */
-  diferenciaDeImporte(movBanco: any, movXubio: any): number {
+  diferenciaDeImporte(movBanco: FilaConciliable, movXubio: FilaConciliable): number {
     const banco = Number(movBanco?.importe ?? 0);
     const xubio = Number(movXubio?.importe ?? 0);
     const diferencia = Math.round((banco - xubio) * 100) / 100;
@@ -510,7 +532,7 @@ export class ConciliacionComponent implements OnInit {
   // Que se muestra en la columna izquierda. Antes del cruce es el extracto
   // importado; después son los pendientes, o los pares si la pestaña activa es
   // la de conciliados.
-  get filasBanco(): any[] {
+  get filasBanco(): MovimientoBanco[] {
     if (!this.cruceRealizado) {
       return this.movimientosBanco;
     }
@@ -519,7 +541,7 @@ export class ConciliacionComponent implements OnInit {
       : this.pendientesBanco;
   }
 
-  get filasXubio(): any[] {
+  get filasXubio(): MovimientoMayor[] {
     if (!this.cruceRealizado) {
       return [];
     }
@@ -536,7 +558,7 @@ export class ConciliacionComponent implements OnInit {
    * la bandeja (todavia no llego, o la bandeja cambio mientras volvia), se
    * muestra todo: un filtro que se aplica a medias es peor que ninguno.
    */
-  get filasXubioFiltradas(): any[] {
+  get filasXubioFiltradas(): MovimientoMayor[] {
     if (
       this.empresaFiltro === '' ||
       this.clasificacionFilasXubio.length !== this.filasXubio.length
@@ -560,7 +582,7 @@ export class ConciliacionComponent implements OnInit {
    * no se esconde: esconder por no saber seria justo el error que este filtro
    * no tiene que cometer.
    */
-  get filasBancoVisibles(): any[] {
+  get filasBancoVisibles(): MovimientoBanco[] {
     if (this.mostrarNoOperativas) {
       return this.filasBanco;
     }
@@ -606,7 +628,7 @@ export class ConciliacionComponent implements OnInit {
    * (importe_xubio) porque el `importe` del par es el del banco; los
    * pendientes traen ya unificado el suyo.
    */
-  importeLadoXubio(mov: any): number {
+  importeLadoXubio(mov: FilaXubio): number {
     if (mov.importe_xubio !== undefined && mov.importe_xubio !== null) {
       return Number(mov.importe_xubio);
     }
@@ -623,12 +645,12 @@ export class ConciliacionComponent implements OnInit {
    * El cruce automatico no manda estos campos, asi que se leen con truthy y no
    * con === true: los pares del backend tienen que contar como automaticos.
    */
-  get paresManuales(): any[] {
+  get paresManuales(): ParConciliado[] {
     return this.conciliados.filter((m) => m.manual);
   }
 
   /** Solo los pares automaticos. El complemento de paresManuales. */
-  get paresAutomaticos(): any[] {
+  get paresAutomaticos(): ParConciliado[] {
     return this.conciliados.filter((m) => !m.manual);
   }
 
@@ -673,8 +695,8 @@ export class ConciliacionComponent implements OnInit {
   }
 
   cargarBancos() {
-    this.http.get(`${API}/extractos/bancos`).subscribe({
-      next: (respuesta: any) => {
+    this.http.get<RespuestaBancos>(`${API}/extractos/bancos`).subscribe({
+      next: (respuesta) => {
         this.bancos = respuesta.bancos ?? [];
         this.formatos = respuesta.formatos ?? [];
         // Preselecciona el primero para no obligar a elegir antes de importar.
@@ -684,7 +706,7 @@ export class ConciliacionComponent implements OnInit {
           this.bancoSeleccionado = this.bancos[0];
         }
       },
-      error: (error) => {
+      error: (error: HttpErrorResponse) => {
         console.error("Error cargando los bancos soportados", error);
         this.errorMensaje = this.mensajeDeError(
           error,
@@ -709,8 +731,8 @@ export class ConciliacionComponent implements OnInit {
   cargarAfiliados() {
     if (this.cargandoAfiliados) return;
     this.cargandoAfiliados = true;
-    this.http.get(`${API}/xubio/afiliados`).subscribe({
-      next: (respuesta: any) => {
+    this.http.get<RespuestaAfiliados>(`${API}/xubio/afiliados`).subscribe({
+      next: (respuesta) => {
         this.afiliados = respuesta.datos ?? [];
         this.afiliadosError = '';
         this.cargandoAfiliados = false;
@@ -724,7 +746,7 @@ export class ConciliacionComponent implements OnInit {
         this.cruzarMovimientosConAfiliados();
         this.clasificarFilasXubio();
       },
-      error: (error) => {
+      error: (error: HttpErrorResponse) => {
         console.error('Error cargando los afiliados de Xubio', error);
         this.cargandoAfiliados = false;
         this.afiliados = [];
@@ -767,7 +789,7 @@ export class ConciliacionComponent implements OnInit {
           this.xubioPassword = '';
           this.cargarAfiliados();
         },
-        error: (error) => {
+        error: (error: HttpErrorResponse) => {
           console.error('Error renovando la sesión de Xubio', error);
           this.xubioRenovando = false;
           this.xubioLoginError = this.mensajeDeError(
@@ -815,7 +837,7 @@ export class ConciliacionComponent implements OnInit {
           : 'Se cerró la sesión de Xubio. Podés volver a iniciar sesión cuando quieras.';
         this.cargarAfiliados();
       },
-      error: (error) => {
+      error: (error: HttpErrorResponse) => {
         console.error('Error cerrando la sesión de Xubio', error);
         this.sesionXubioAccion = '';
         this.errorMensaje = this.mensajeDeError(
@@ -837,15 +859,15 @@ export class ConciliacionComponent implements OnInit {
     if (this.afiliados.length === 0 || this.movimientosBanco.length === 0) return;
 
     this.http
-      .post(`${API}/xubio/cruzar-afiliados`, {
+      .post<RespuestaCruceAfiliados>(`${API}/xubio/cruzar-afiliados`, {
         movimientos: this.movimientosBanco,
         afiliados: this.afiliados,
       })
       .subscribe({
-        next: (respuesta: any) => {
+        next: (respuesta) => {
           this.cruceConAfiliados = respuesta.datos ?? [];
         },
-        error: (error) => {
+        error: (error: HttpErrorResponse) => {
           console.error('Error cruzando los movimientos con los afiliados', error);
           // No es fatal: la lista con los IVAs sigue visible, solo pierde el
           // conteo de posibles conciliaciones.
@@ -869,15 +891,15 @@ export class ConciliacionComponent implements OnInit {
     if (this.afiliados.length === 0 || filas.length === 0) return;
 
     this.http
-      .post(`${API}/xubio/clasificar-mayor`, {
+      .post<RespuestaCruceAfiliados>(`${API}/xubio/clasificar-mayor`, {
         movimientos: filas,
         afiliados: this.afiliados,
       })
       .subscribe({
-        next: (respuesta: any) => {
+        next: (respuesta) => {
           this.clasificacionFilasXubio = respuesta.datos ?? [];
         },
-        error: (error) => {
+        error: (error: HttpErrorResponse) => {
           console.error('Error clasificando los movimientos de Xubio por empresa', error);
           // No es fatal: la bandeja sigue visible, solo pierde el filtro por
           // empresa (y el desplegable vuelve a "Todas").
@@ -903,8 +925,8 @@ export class ConciliacionComponent implements OnInit {
    * posible conciliacion (mas arriba el que acumule mas) y despues el resto,
    * por nombre.
    */
-  get afiliadosConPosiblesConciliaciones(): any[] {
-    const porId = new Map<number, any>();
+  get afiliadosConPosiblesConciliaciones(): AfiliadoConConciliaciones[] {
+    const porId = new Map<number, AfiliadoConConciliaciones>();
     for (const cruce of this.cruceConAfiliados) {
       const afiliado = cruce?.afiliado;
       if (!afiliado) continue;
@@ -1010,7 +1032,7 @@ export class ConciliacionComponent implements OnInit {
 
     try {
       this.http
-        .post(`${API}/extractos/procesar`, formData)
+        .post<RespuestaExtraccion>(`${API}/extractos/procesar`, formData)
         .pipe(
           timeout(TIMEOUT_IMPORTACION_MS),
           catchError((error) => {
@@ -1025,7 +1047,7 @@ export class ConciliacionComponent implements OnInit {
           })
         )
         .subscribe({
-          next: (respuesta: any) => {
+          next: (respuesta) => {
             this.movimientosBanco = respuesta.datos ?? [];
             // El banco que el backend uso de verdad (GENERICO en la via tabla).
             // Sin esto el selector seguia mostrando el primero de la lista, que
@@ -1051,7 +1073,7 @@ export class ConciliacionComponent implements OnInit {
             // el conteo de posibles conciliaciones del panel derecho.
             this.cruzarMovimientosConAfiliados();
           },
-          error: (error) => {
+          error: (error: HttpErrorResponse) => {
             console.error("Error procesando el extracto", error);
             this.cargando = false;
             this.movimientosBanco = [];
@@ -1145,7 +1167,7 @@ export class ConciliacionComponent implements OnInit {
               `Libro Mayor cargado: ${this.movimientosMayor.length} movimientos ` +
               `de ${archivo.name}.${convencion} Ya se puede pedir Autoconciliar.`;
           },
-          error: (error) => {
+          error: (error: HttpErrorResponse) => {
             console.error('Error leyendo el Libro Mayor', error);
             this.cargando = false;
             // Se conserva el mayor anterior si lo habia: el archivo que fallo
@@ -1177,13 +1199,13 @@ export class ConciliacionComponent implements OnInit {
    * FastAPI manda los motivos en error.detail. A veces es un string y a veces
    * una lista de validación, así que se lee de los dos tamaños.
    */
-  mensajeDeError(error: any, porDefecto = 'Ocurrió un error al leer el extracto.'): string {
-    const detail = error?.error?.detail;
+  mensajeDeError(error: unknown, porDefecto = 'Ocurrió un error al leer el extracto.'): string {
+    const detail = (error as { error?: { detail?: unknown } } | null)?.error?.detail;
     if (typeof detail === 'string' && detail.trim()) {
       return detail;
     }
     if (Array.isArray(detail) && detail.length > 0) {
-      return detail.map((d: any) => d?.msg ?? JSON.stringify(d)).join('; ');
+      return detail.map((d) => (d as { msg?: string })?.msg ?? JSON.stringify(d)).join('; ');
     }
     return porDefecto;
   }
@@ -1301,7 +1323,7 @@ export class ConciliacionComponent implements OnInit {
           `${this.pendientesBanco.length} pendientes del banco y ` +
           `${this.pendientesXubio.length} pendientes de Xubio.`;
       },
-      error: (error) => {
+      error: (error: HttpErrorResponse) => {
         console.error('Error exportando el papel de trabajo', error);
         this.exportando = false;
         // El mensaje se resuelve despues porque con responseType 'blob' el
@@ -1370,12 +1392,12 @@ export class ConciliacionComponent implements OnInit {
     // Los dos lados van en el cuerpo: el mayor viene del archivo que cargo el
     // usuario, no de la API de Xubio, que esta reservada a planes superiores.
     this.http
-      .post(`${API}/conciliacion/cruzar`, {
+      .post<RespuestaCruce>(`${API}/conciliacion/cruzar`, {
         movimientos_banco: this.movimientosBanco,
         movimientos_xubio: this.movimientosMayor,
       })
       .subscribe({
-      next: (respuesta: any) => {
+      next: (respuesta) => {
           // El backend devuelve {exito, resumen, tablas:{conciliados,
           // pendientes_banco, pendientes_xubio}}. Leer respuesta.movimientos
           // devolvia undefined y dejaba la columna derecha siempre vacia.
@@ -1410,7 +1432,7 @@ export class ConciliacionComponent implements OnInit {
           `${this.pendientesBanco.length} del banco sin cruce y ` +
           `${this.pendientesXubio.length} de Xubio sin cruce.`;
       },
-      error: (error) => {
+      error: (error: HttpErrorResponse) => {
         console.error("Error al conciliar", error);
         this.cargando = false;
         this.cruceRealizado = false;

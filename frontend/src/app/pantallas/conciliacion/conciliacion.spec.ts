@@ -149,7 +149,7 @@ describe('ConciliacionComponent', () => {
         manual: true,
       },
     ];
-    component.ultimoPareoManual = { banco: {}, xubio: {} };
+    component.ultimoPareoManual = { banco: {}, xubio: {} } as any;
 
     component.importarExcel(archivoConNombre('agosto.xlsx'));
     http.expectOne(`${API}/extractos/procesar`).flush({
@@ -277,8 +277,8 @@ describe('ConciliacionComponent', () => {
     // El banco y el Xubio invierten debe/haber: el mismo hecho va con signo
     // contrario en las dos columnas, pero el importe con signo ya viene
     // unificado por el backend.
-    expect(component.diferenciaDeImporte({ importe: -250.5 }, { importe: -250.5 })).toBe(0);
-    expect(component.diferenciaDeImporte({ importe: 1000 }, { importe: 700 })).toBe(300);
+    expect(component.diferenciaDeImporte({ importe: -250.5 } as any, { importe: -250.5 } as any)).toBe(0);
+    expect(component.diferenciaDeImporte({ importe: 1000 } as any, { importe: 700 } as any)).toBe(300);
   });
 
   it('no se puede soltar una fila del banco sobre otra del banco', () => {
@@ -534,7 +534,7 @@ describe('ConciliacionComponent', () => {
         manual: true,
       },
     ];
-    component.ultimoPareoManual = { banco: {}, xubio: {} };
+    component.ultimoPareoManual = { banco: {}, xubio: {} } as any;
 
     elegirMayor('mayor.xlsx');
     http.expectOne(`${API}/conciliacion/mayor`).flush({
@@ -1106,7 +1106,7 @@ describe('ConciliacionComponent', () => {
     await fixture.whenStable();
 
     expect(component.totalMovimientosConPosibleConciliacion).toBe(1);
-    expect(component.cruceConAfiliados[0].afiliado.organizacionNombre).toBe('2GTECH ELECTRONICA S.A.');
+    expect(component.cruceConAfiliados[0].afiliado!.organizacionNombre).toBe('2GTECH ELECTRONICA S.A.');
   });
 
   it('cuenta las posibles conciliaciones por afiliado y deja los demas al final', async () => {

@@ -1,10 +1,10 @@
 import { CommonModule } from '@angular/common';
-import { HttpClient, HttpEventType } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse, HttpEvent, HttpEventType } from '@angular/common/http';
 import { Component, OnDestroy, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { Subscription, timeout } from 'rxjs';
 
-import { ImportacionService } from '../../servicios/importacion.service';
+import { ImportacionService, MovimientoImportado } from '../../servicios/importacion.service';
 
 const API = 'http://127.0.0.1:8000/api';
 
@@ -22,6 +22,15 @@ interface PasoProceso {
   detalle: string;
   /** Que esta haciendo el backend mientras este paso esta en curso. */
   haciendo: string;
+}
+
+/**
+ * Lo que esta pantalla usa de POST /extractos/procesar: los movimientos ya
+ * normalizados y, si el 200 viene sin filas, el motivo que manda el extractor.
+ */
+interface RespuestaProcesar {
+  datos?: MovimientoImportado[];
+  detail?: string;
 }
 
 /**
@@ -157,7 +166,7 @@ export class ProcesandoPdfComponent implements OnDestroy {
     // el cuerpo, que es lo que separa el paso 1 del paso 2.
     this.subscription.add(
       this.http
-        .post(`${API}/extractos/procesar`, cuerpo, {
+        .post<RespuestaProcesar>(`${API}/extractos/procesar`, cuerpo, {
           observe: 'events',
           reportProgress: true,
         })
@@ -181,7 +190,7 @@ export class ProcesandoPdfComponent implements OnDestroy {
     );
   }
 
-  private alEvento(evento: any): void {
+  private alEvento(evento: HttpEvent<RespuestaProcesar>): void {
     switch (evento.type) {
       case HttpEventType.UploadProgress:
         this.envioProgreso.set(
@@ -211,7 +220,7 @@ export class ProcesandoPdfComponent implements OnDestroy {
     }
   }
 
-  private alRespuesta(cuerpo: any): void {
+  private alRespuesta(cuerpo: RespuestaProcesar | null): void {
     const movimientos = cuerpo?.datos ?? [];
 
     if (!movimientos.length) {
@@ -234,14 +243,14 @@ export class ProcesandoPdfComponent implements OnDestroy {
     this.router.navigate(['/verificar-importacion']);
   }
 
-  private alError(error: any): void {
+  private alError(error: HttpErrorResponse): void {
     const detalle = error?.error?.detail;
     const mensaje =
       typeof detalle === 'string' && detalle.trim()
         ? detalle
         : Array.isArray(detalle) && detalle.length
-          ? detalle.map((d: any) => d?.msg ?? JSON.stringify(d)).join('; ')
-          : error?.name === 'TimeoutError'
+          ? detalle.map((d: unknown) => (d as { msg?: string })?.msg ?? JSON.stringify(d)).join('; ')
+          : (error as { name?: string } | null)?.name === 'TimeoutError'
             ? `El backend no respondió en ${TIMEOUT_IMPORTACION_MS / 1000} segundos. Puede que el PDF sea muy pesado o que un extractor se haya quedado leyendo.`
             : 'No se pudo procesar el PDF.';
 

@@ -324,15 +324,27 @@ def test_la_hoja_de_movimientos_acumula_credito_menos_debito():
     assert hoja["E10"].value == "=E9+D10-C10"
 
 
-def test_la_hoja_de_movimientos_totaliza_debitos_y_creditos():
+def test_la_hoja_de_movimientos_totaliza_debitos_y_creditos_al_lado():
     hoja = _movimientos(exportador.exportar(_solicitud()))
 
-    # Una sola fila "TOTALES" al pie del extracto: suma de la columna Debito,
-    # suma de la columna Credito y el saldo de la ultima fila.
-    assert hoja["A11"].value == "TOTALES"
-    assert hoja["C11"].value == "=SUM(C9:C10)"
-    assert hoja["D11"].value == "=SUM(D9:D10)"
-    assert hoja["E11"].value == "=E10"
+    # El cuadro de sumas va al lado de la tabla, en G8:H9: total de la columna
+    # Debito (C) y total de la columna Credito (D).
+    assert hoja["G8"].value == "Total Débitos"
+    assert hoja["H8"].value == "=SUM(C9:C10)"
+    assert hoja["G9"].value == "Total Créditos"
+    assert hoja["H9"].value == "=SUM(D9:D10)"
+    # Ya no hay una fila TOTALES abajo de la tabla.
+    assert hoja["A11"].value is None
+
+
+def test_la_hoja_de_movimientos_sin_filas_igual_muestra_el_cuadro():
+    hoja = _movimientos(exportador.exportar(_solicitud(movimientos_banco=[])))
+
+    # Sin movimientos el rango de las sumas queda en la unica fila: da 0.
+    assert hoja["G8"].value == "Total Débitos"
+    assert hoja["H8"].value == "=SUM(C9:C9)"
+    assert hoja["G9"].value == "Total Créditos"
+    assert hoja["H9"].value == "=SUM(D9:D9)"
 
 
 def test_la_hoja_de_movimientos_no_lleva_control_de_diferencia():
@@ -356,11 +368,11 @@ def test_la_hoja_de_movimientos_escribe_una_sola_vez_las_lineas_repetidas():
         )
     )
 
-    # La comision repetida se escribe una sola vez y el TOTALES queda en la
-    # primera fila libre (11), no en la 12.
+    # La comision repetida se escribe una sola vez: la fila 11 queda libre y el
+    # cuadro de sumas totaliza nada mas que las dos filas que quedaron.
     assert hoja["B10"].value == "COMISION"
-    assert hoja["A11"].value == "TOTALES"
-    assert hoja["C11"].value == "=SUM(C9:C10)"
+    assert hoja["A11"].value is None
+    assert hoja["H8"].value == "=SUM(C9:C10)"
 
 
 # ----------------------------------------------------------------------

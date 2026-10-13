@@ -20,8 +20,8 @@ Estructura (hoja "Libro Mayor"):
 Hoja "Movimientos Bancarios": el extracto como el resumen del banco, en una sola
 tabla de cinco columnas (Fecha contable | Concepto | Debito en $ | Credito en $
 | Saldo en $) que arranca en la fila 8, con el saldo acumulado por formula
-`=E(anterior)+D-C` y una fila "TOTALES" al pie con las sumas de debitos y
-creditos. Las lineas repetidas del extracto se escriben una sola vez.
+`=E(anterior)+D-C` y un cuadro con las sumas de debitos y creditos al lado de la
+tabla (G8:H9). Las lineas repetidas del extracto se escriben una sola vez.
 
 Los importes que cruzaron van en amarillo y los debitos del banco pendientes de
 registracion contable, en verde claro (colores del punto 4 del formulario).
@@ -136,6 +136,9 @@ ANCHOS_MOVIMIENTOS = {
     "C": 18.0,
     "D": 18.0,
     "E": 20.0,
+    # Cuadro de sumas al lado de la tabla (cols. G y H).
+    "G": 16.0,
+    "H": 18.0,
 }
 
 # ----------------------------------------------------------------------
@@ -157,6 +160,14 @@ ALINEACION_DERECHA = Alignment(horizontal="right", shrink_to_fit=True)
 ALINEACION_CENTRO = Alignment(horizontal="center")
 ALINEACION_IZQUIERDA = Alignment(horizontal="left")
 BORDE_ENCABEZADO = Border(bottom=Side(style="thin"))
+# El cuadro de sumas del extracto es un recuadro chico: borde por los cuatro
+# lados para que se lea como una caja y no como dos celdas sueltas.
+BORDE_CUADRO = Border(
+    left=Side(style="thin"),
+    right=Side(style="thin"),
+    top=Side(style="thin"),
+    bottom=Side(style="thin"),
+)
 
 
 def ruta_plantilla() -> Path:
@@ -566,14 +577,35 @@ def _sin_repetidos(
     return unicos
 
 
+def _armar_cuadro_totales(hoja: Worksheet, primer_dato: int, ultima: int) -> None:
+    """Cuadro de sumas (debitos y creditos) al lado de la tabla del extracto.
+
+    Va en G8:H9, a la altura del encabezado: son las dos sumas que el usuario
+    quiere ver de un vistazo sin bajar hasta el pie. Los valores son formulas
+    sobre la columna Debito (C) y la columna Credito (D) de la tabla.
+    """
+    filas = (
+        ("Total Débitos", f"=SUM(C{primer_dato}:C{ultima})"),
+        ("Total Créditos", f"=SUM(D{primer_dato}:D{ultima})"),
+    )
+    for desplazamiento, (etiqueta, formula) in enumerate(filas):
+        fila = FILA_ENCABEZADO_MOVIMIENTOS + desplazamiento
+        celda = hoja.cell(row=fila, column=7, value=etiqueta)
+        celda.font = FUENTE_TITULO_SECCION
+        celda.alignment = ALINEACION_IZQUIERDA
+        celda.border = BORDE_CUADRO
+        _celda_formula(hoja, fila, 8, formula)
+        hoja.cell(row=fila, column=8).border = BORDE_CUADRO
+
+
 def _armar_movimientos(
     hoja: Worksheet, solicitud: SolicitudExportacion, pendientes: Counter
 ) -> None:
     """El extracto como el resumen del banco: cinco columnas, sin los codigos.
 
     Solo van Fecha contable, Concepto, Debito en $, Credito en $ y Saldo en $.
-    El saldo acumula credito menos debito por formula y cierra con una fila
-    "TOTALES".
+    El saldo acumula credito menos debito por formula y las sumas de debitos y
+    creditos van en un cuadro al lado de la tabla (G8:H9).
     """
     _escribir_encabezados(hoja, FILA_ENCABEZADO_MOVIMIENTOS, COLUMNAS_MOVIMIENTOS)
 
@@ -618,15 +650,9 @@ def _armar_movimientos(
             _pintar_importe(hoja, fila, debe, haber, RELLENO_CONCILIADO, 3, 4)
         fila += 1
 
-    if fila > primer_dato:
-        # Una sola fila de totalizacion al pie del extracto: la suma de debitos
-        # (col. C), la de creditos (col. D) y el saldo de la ultima fila. Sin
-        # "Control de diferencia" ni referencias al Libro Mayor.
-        ultima = fila - 1
-        _titulo_seccion(hoja, fila, "TOTALES")
-        _celda_formula(hoja, fila, 3, f"=SUM(C{primer_dato}:C{ultima})")
-        _celda_formula(hoja, fila, 4, f"=SUM(D{primer_dato}:D{ultima})")
-        _celda_formula(hoja, fila, 5, f"=E{ultima}")
+    # Sin filas el rango de las sumas queda en la unica fila que existe: da 0.
+    ultima = fila - 1 if fila > primer_dato else primer_dato
+    _armar_cuadro_totales(hoja, primer_dato, ultima)
 
 
 # ----------------------------------------------------------------------

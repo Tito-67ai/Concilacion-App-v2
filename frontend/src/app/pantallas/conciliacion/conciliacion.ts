@@ -24,6 +24,7 @@ import {
   RespuestaCruceAfiliados,
   RespuestaExtraccion,
   RespuestaMayor,
+  RespuestaMayorXubio,
   SolicitudExportacion,
 } from '../../modelos/conciliacion';
 import { ExportacionService } from '../../servicios/exportacion.service';
@@ -42,6 +43,11 @@ const TIMEOUT_IMPORTACION_MS = 180000;
 // Los tres formatos que se pueden subir. Compartidos por el extracto y por el
 // Libro Mayor: son el mismo archivo de Excel con otras columnas adentro.
 const FORMATOS_TABLA = ['.xlsx', '.xls', '.csv'];
+
+// Cuantos dias se estira el rango del extracto al pedirle el mayor a Xubio.
+// El cruce tolera +-3 dias, asi que un movimiento del borde puede tener su par
+// justo afuera del extracto; con esta margen no se pierde.
+const MARGEN_DIAS_MAYOR = 3;
 
 // Destino del enlace de ayuda. Vacio a proposito: sin canal de soporte definido
 // es preferible abrir el cliente de correo con el asunto puesto que inventar una
@@ -291,10 +297,18 @@ export class ConciliacionComponent implements OnInit {
   private _movimientosMayor: MovimientoMayor[] = [];
   get movimientosMayor(): MovimientoMayor[] { return this._movimientosMayor; }
   set movimientosMayor(valor: MovimientoMayor[]) { this._movimientosMayor = valor; this.notificar(); }
-  // El nombre del archivo, para que se vea cual quedo cargado si cambia.
+  // El nombre del archivo (o del reporte) cargado, para que se vea cual quedo
+  // si cambia.
   private _nombreMayor: string = '';
   get nombreMayor(): string { return this._nombreMayor; }
   set nombreMayor(valor: string) { this._nombreMayor = valor; this.notificar(); }
+
+  // Traer el mayor por la sesion web de Xubio (el boton "Traer de Xubio"): es
+  // lo mismo que subir el Excel, pero sin el paso manual de exportar. Mientras
+  // el webreport contesta, el boton muestra el spinner.
+  private _cargandoMayorXubio: boolean = false;
+  get cargandoMayorXubio(): boolean { return this._cargandoMayorXubio; }
+  set cargandoMayorXubio(valor: boolean) { this._cargandoMayorXubio = valor; this.notificar(); }
 
   // El rango de fechas de los filtros. Antes eran dos <input type="date"> con
   // el value puesto en el HTML y sin binding: la pantalla mostraba siempre
@@ -1285,6 +1299,124 @@ export class ConciliacionComponent implements OnInit {
       this.errorMensaje =
         'No se pudo enviar el archivo al backend. Revisá que FastAPI esté corriendo en el puerto 8000.';
     }
+  }
+
+  // ------------------------------------------------------------------
+  // Traer el mayor del período directo de Xubio (sin exportar/subir el Excel)
+  // ------------------------------------------------------------------
+
+  /**
+   * Pide el Libro Mayor a Xubio por la sesión web que captura el bot.
+   *
+   * El período sale del extracto: pedir un rango distinto al que se va a
+   * cruzar dejaría pares afuera. Se estira unos días a cada lado porque el
+   * cruce tolera ±3 días y un movimiento del borde puede tener su par justo
+   * afuera del extracto.
+   */
+  traerMayorDeXubio() {
+    if (this.cargando || this.cargandoMayorXubio) return;
+
+    const rango = this.rangoDelExtracto();
+    if (!rango) {
+      this.errorMensaje =
+        'Primero importá el extracto del banco: de ahí sale el período para ' +
+        'pedirle el Libro Mayor a Xubio.';
+      return;
+    }
+
+    this.cargandoMayorXubio = true;
+    this.errorMensaje = '';
+    this.infoMensaje = '';
+
+    const periodo =
+      `?desde=${encodeURIComponent(rango.desde)}` +
+      `&hasta=${encodeURIComponent(rango.hasta)}`;
+
+    this.http
+      .get<RespuestaMayorXubio>(`${API}/xubio/libro-mayor${periodo}`)
+      .pipe(
+        timeout(TIMEOUT_IMPORTACION_MS),
+        catchError((error) => {
+          if (error?.name === 'TimeoutError') {
+            error.error = {
+              detail:
+                `Xubio no respondió en ${TIMEOUT_IMPORTACION_MS / 1000} segundos. ` +
+                'El Libro Mayor del período completo puede ser muy pesado.',
+            };
+          }
+          return throwError(() => error);
+        })
+      )
+      .subscribe({
+        next: (respuesta) => {
+          this.cargandoMayorXubio = false;
+          const movimientos = respuesta?.movimientos ?? [];
+          if (movimientos.length === 0) {
+            this.errorMensaje =
+              `Xubio no devolvió movimientos del Libro Mayor entre ` +
+              `${rango.desde} y ${rango.hasta}. Revisá el período.`;
+            return;
+          }
+
+          this.movimientosMayor = movimientos;
+          this.nombreMayor = `Xubio (${rango.desde} a ${rango.hasta})`;
+          // El cruce que quedaba era contra el mayor anterior: sin borrarlo,
+          // las bandejas dirían una cosa y este reporte otra.
+          this.limpiarCruceAnterior();
+
+          const convencion =
+            respuesta.convencion === 'cuenta'
+              ? ' Convención de cuenta: el débito es salida.'
+              : '';
+          this.infoMensaje =
+            `Libro Mayor de Xubio: ${movimientos.length} movimientos ` +
+            `(${rango.desde} a ${rango.hasta}).${convencion} Ya se puede pedir Autoconciliar.`;
+        },
+        error: (error: HttpErrorResponse) => {
+          console.error('Error trayendo el Libro Mayor de Xubio', error);
+          this.cargandoMayorXubio = false;
+          this.errorMensaje = this.mensajeDeError(
+            error,
+            'No se pudo traer el Libro Mayor de Xubio. Revisá que FastAPI esté corriendo en el puerto 8000.'
+          );
+        },
+      });
+  }
+
+  /** El rango de fechas del extracto, o null si todavía no hay extracto. */
+  private rangoDelExtracto(): { desde: string; hasta: string } | null {
+    const fechas = this.movimientosBanco
+      .map((m) => (m.fecha ?? '').slice(0, 10))
+      .filter((f) => /^\d{4}-\d{2}-\d{2}$/.test(f))
+      .sort();
+    if (fechas.length === 0) return null;
+    return {
+      desde: this.desplazarFecha(fechas[0], -MARGEN_DIAS_MAYOR),
+      hasta: this.desplazarFecha(fechas[fechas.length - 1], MARGEN_DIAS_MAYOR),
+    };
+  }
+
+  /** 'YYYY-MM-DD' más días, sin que la zona horaria corra la fecha. */
+  private desplazarFecha(iso: string, dias: number): string {
+    const [anio, mes, dia] = iso.split('-').map(Number);
+    const fecha = new Date(Date.UTC(anio, mes - 1, dia));
+    fecha.setUTCDate(fecha.getUTCDate() + dias);
+    return fecha.toISOString().slice(0, 10);
+  }
+
+  /** Si el botón "Traer de Xubio" se puede usar ahora mismo. */
+  get puedeTraerMayorDeXubio(): boolean {
+    return !this.cargando && !this.cargandoMayorXubio && !!this.rangoDelExtracto();
+  }
+
+  /** Por qué está deshabilitado, para el tooltip. Vacío si se puede usar. */
+  get motivoTraerMayorBloqueado(): string {
+    if (this.cargando) return 'Esperá a que termine la carga en curso.';
+    if (this.cargandoMayorXubio) return 'Trayendo el Libro Mayor de Xubio…';
+    if (!this.rangoDelExtracto()) {
+      return 'Primero importá el extracto del banco: de ahí sale el período.';
+    }
+    return '';
   }
 
   /**

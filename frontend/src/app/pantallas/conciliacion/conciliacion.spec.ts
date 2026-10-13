@@ -549,6 +549,83 @@ describe('ConciliacionComponent', () => {
     expect(component.ultimoPareoManual).toBeNull();
   });
 
+  it('traer el Libro Mayor de Xubio usa el período del extracto y lo carga', async () => {
+    // El rango se estira 3 dias a cada lado: el cruce tolera +-3 dias y el par
+    // de un movimiento del borde puede estar justo afuera del extracto.
+    component.movimientosBanco = [
+      { fecha: '2026-09-10', concepto: 'A', debe: 0, haber: 100, saldo: 100 },
+      { fecha: '2026-09-20', concepto: 'B', debe: 50, haber: 0, saldo: 50 },
+    ];
+
+    expect(component.puedeTraerMayorDeXubio).toBe(true);
+    component.traerMayorDeXubio();
+
+    const req = http.expectOne(`${API}/xubio/libro-mayor?desde=2026-09-07&hasta=2026-09-23`);
+    req.flush({
+      exito: true,
+      desde: '2026-09-07',
+      hasta: '2026-09-23',
+      cantidad: 1,
+      convencion: 'contable',
+      movimientos: [FILA_MAYOR],
+    });
+    await fixture.whenStable();
+
+    expect(component.cargandoMayorXubio).toBe(false);
+    expect(component.movimientosMayor.length).toBe(1);
+    expect(component.nombreMayor).toContain('Xubio');
+    expect(component.infoMensaje).toContain('1 movimientos');
+    expect(component.puedeAutoconciliar).toBe(true);
+  });
+
+  it('sin extracto el botón de traer de Xubio está apagado y no pide nada', () => {
+    expect(component.puedeTraerMayorDeXubio).toBe(false);
+    expect(component.motivoTraerMayorBloqueado).toContain('extracto');
+
+    component.traerMayorDeXubio();
+
+    http.expectNone(`${API}/xubio/libro-mayor?desde=2026-09-07&hasta=2026-09-23`);
+    expect(component.errorMensaje).toContain('extracto');
+    expect(component.movimientosMayor.length).toBe(0);
+  });
+
+  it('si Xubio no tiene sesión se ve el motivo y no se cambia el mayor anterior', async () => {
+    component.movimientosBanco = [{ fecha: '2026-09-10', concepto: 'A', debe: 0, haber: 100, saldo: 100 }];
+    component.movimientosMayor = [{ fecha: '2026-08-01', concepto: 'X', debe: 1, haber: 0 }];
+    component.nombreMayor = 'agosto.xlsx';
+
+    component.traerMayorDeXubio();
+    http
+      .expectOne(`${API}/xubio/libro-mayor?desde=2026-09-07&hasta=2026-09-13`)
+      .flush(
+        { detail: 'No hay sesión de Xubio guardada. Corré el bot de login y volvé a intentar.' },
+        { status: 503, statusText: 'Service Unavailable' }
+      );
+    await fixture.whenStable();
+
+    expect(component.cargandoMayorXubio).toBe(false);
+    expect(component.errorMensaje).toContain('sesión de Xubio');
+    expect(component.movimientosMayor.length).toBe(1);
+    expect(component.nombreMayor).toBe('agosto.xlsx');
+  });
+
+  it('traer el Libro Mayor de Xubio borra el cruce anterior', () => {
+    component.movimientosBanco = [{ fecha: '2026-09-10', concepto: 'A', debe: 0, haber: 100, saldo: 100 }];
+    component.cruceRealizado = true;
+    component.ultimoPareoManual = { banco: {}, xubio: {} } as any;
+
+    component.traerMayorDeXubio();
+    http.expectOne(`${API}/xubio/libro-mayor?desde=2026-09-07&hasta=2026-09-13`).flush({
+      exito: true,
+      cantidad: 1,
+      convencion: 'contable',
+      movimientos: [FILA_MAYOR],
+    });
+
+    expect(component.cruceRealizado).toBe(false);
+    expect(component.ultimoPareoManual).toBeNull();
+  });
+
   it('Autoconciliar manda los dos lados en el cuerpo', () => {
     const banco = { fecha: '2026-09-01', concepto: 'COBRO', debe: 0, haber: 100, saldo: 100 };
     component.movimientosBanco = [banco];

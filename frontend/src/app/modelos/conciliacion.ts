@@ -59,6 +59,20 @@ export interface RespuestaMayor {
   datos: MovimientoMayor[];
 }
 
+/**
+ * Lo que devuelve GET /xubio/libro-mayor: el mayor del período pedido, ya
+ * parseado en el backend desde la grilla del webreport. `datos` (el JSON
+ * crudo) no interesa acá: lo que se muestra es `movimientos`.
+ */
+export interface RespuestaMayorXubio {
+  exito: boolean;
+  desde: string | null;
+  hasta: string | null;
+  cantidad: number;
+  convencion: string;
+  movimientos: MovimientoMayor[];
+}
+
 /** Un par yaconciliado: una fila del banco emparejada con una del mayor. */
 export interface ParConciliado {
   fecha: string | null;

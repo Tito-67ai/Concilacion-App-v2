@@ -126,6 +126,20 @@
              class="hidden"
              (change)="cargarMayor($event)">
 
+      <!-- Botón Traer de Xubio: el mismo Libro Mayor, sin exportar ni subir el
+           Excel. El período sale del extracto cargado, por eso se apaga hasta
+           que haya uno. Usa la sesión web que captura el bot de login. -->
+      <button (click)="traerMayorDeXubio()"
+              [disabled]="!puedeTraerMayorDeXubio"
+              [title]="puedeTraerMayorDeXubio
+                ? 'Traer el Libro Mayor del período directo de Xubio'
+                : motivoTraerMayorBloqueado"
+              class="flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3.5 py-2 text-sm text-gray-700 shadow-sm transition-colors duration-200 hover:border-gray-400 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-gray-300 disabled:hover:bg-white">
+        <i *ngIf="cargandoMayorXubio" class="pi pi-spin pi-spinner text-xs"></i>
+        <i *ngIf="!cargandoMayorXubio" class="pi pi-cloud-download text-xs"></i>
+        {{ cargandoMayorXubio ? 'Trayendo…' : 'Traer de Xubio' }}
+      </button>
+
       <!-- Botón Autoconciliar: cruza el extracto contra el Libro Mayor cargado.
            Se apaga mientras corre el cruce (tres clicks son un solo cruce) y si
            falta alguno de los dos lados, con el motivo escrito al lado y no solo

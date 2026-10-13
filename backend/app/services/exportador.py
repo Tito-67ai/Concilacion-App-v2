@@ -17,9 +17,10 @@ Estructura (hoja "Libro Mayor"):
     ...         Pie: saldo ajustado, saldo según extracto y el control de
                 diferencia `=F(ajustado)-F(extracto)`.
 
-Hoja "Movimientos Bancarios": el extracto completo en una sola tabla de 17
-columnas (A-Q) que arranca en la fila 8, con el saldo acumulado por formula
-`=F(anterior)+E-D` y una fila "TOTALES" al pie con las sumas de debitos y
+Hoja "Movimientos Bancarios": el extracto como el resumen del banco, en una sola
+tabla de cinco columnas (Fecha contable | Concepto | Debito en $ | Credito en $
+| Saldo en $) que arranca en la fila 8, con el saldo acumulado por formula
+`=E(anterior)+D-C` y una fila "TOTALES" al pie con las sumas de debitos y
 creditos. Las lineas repetidas del extracto se escriben una sola vez.
 
 Los importes que cruzaron van en amarillo y los debitos del banco pendientes de
@@ -102,24 +103,14 @@ COLUMNAS_TABLA3 = [
     "Saldo",
     "Descripción",
 ]
+# El extracto va como el resumen del banco: las cinco columnas que el usuario
+# quiere ver y nada mas (fecha, concepto, debito, credito y saldo).
 COLUMNAS_MOVIMIENTOS = [
     "Fecha contable",
-    "Cod de Concepto",
     "Concepto",
     "Debito en $",
     "Credito en $",
     "Saldo en $",
-    "Informacion Complementaria",
-    "Nro de cheque",
-    "Sucursal Origen",
-    "Canal",
-    "Banco",
-    "CBU/Alias",
-    "Tipo trf",
-    "Referencia",
-    "Nombre",
-    "Tipo doc",
-    "Nro doc",
 ]
 
 TITULO_PARTIDAS_CONTABLES = "Partidas contables no registradas en banco."
@@ -141,22 +132,10 @@ ANCHOS_MAYOR = {
 }
 ANCHOS_MOVIMIENTOS = {
     "A": 14.0,
-    "B": 14.0,
-    "C": 34.0,
+    "B": 40.0,
+    "C": 18.0,
     "D": 18.0,
-    "E": 18.0,
-    "F": 20.0,
-    "G": 24.0,
-    "H": 12.0,
-    "I": 16.0,
-    "J": 12.0,
-    "K": 12.0,
-    "L": 22.0,
-    "M": 12.0,
-    "N": 20.0,
-    "O": 24.0,
-    "P": 10.0,
-    "Q": 16.0,
+    "E": 20.0,
 }
 
 # ----------------------------------------------------------------------
@@ -262,16 +241,26 @@ def _clave_mayor(fecha, concepto, comprobante, debe, haber) -> tuple:
     )
 
 
-def _pintar_importe(hoja: Worksheet, fila: int, debe: float, haber: float, relleno) -> None:
+def _pintar_importe(
+    hoja: Worksheet,
+    fila: int,
+    debe: float,
+    haber: float,
+    relleno,
+    col_debe: int = 4,
+    col_haber: int = 5,
+) -> None:
     """Pinta solo la celda del importe que tiene valor.
 
-    El debe va en la columna D y el haber en la E; una fila normalmente trae uno
-    solo. Se pinta esa celda, no las dos, como en el resto del formulario.
+    Por defecto el debe va en la columna D (4) y el haber en la E (5), que es
+    como esta armado el Libro Mayor. La hoja de movimientos usa el layout del
+    extracto (debito en C, credito en D) y pasa sus columnas. Una fila
+    normalmente trae un importe solo: se pinta esa celda, no las dos.
     """
     if debe:
-        hoja.cell(row=fila, column=4).fill = relleno
+        hoja.cell(row=fila, column=col_debe).fill = relleno
     elif haber:
-        hoja.cell(row=fila, column=5).fill = relleno
+        hoja.cell(row=fila, column=col_haber).fill = relleno
 
 
 # ----------------------------------------------------------------------
@@ -580,6 +569,12 @@ def _sin_repetidos(
 def _armar_movimientos(
     hoja: Worksheet, solicitud: SolicitudExportacion, pendientes: Counter
 ) -> None:
+    """El extracto como el resumen del banco: cinco columnas, sin los codigos.
+
+    Solo van Fecha contable, Concepto, Debito en $, Credito en $ y Saldo en $.
+    El saldo acumula credito menos debito por formula y cierra con una fila
+    "TOTALES".
+    """
     _escribir_encabezados(hoja, FILA_ENCABEZADO_MOVIMIENTOS, COLUMNAS_MOVIMIENTOS)
 
     fila = FILA_ENCABEZADO_MOVIMIENTOS + 1
@@ -594,58 +589,44 @@ def _armar_movimientos(
         es_pendiente = pendientes[clave] > 0
         if es_pendiente:
             pendientes[clave] -= 1
+        debe = _importe(movimiento.debe)
+        haber = _importe(movimiento.haber)
         _escribir_fila(
             hoja,
             fila,
             [
                 _fecha(movimiento.fecha),
-                "",
                 movimiento.concepto or "",
-                _importe(movimiento.debe),
-                _importe(movimiento.haber),
+                debe,
+                haber,
                 None,
-                "",
-                "",
-                "",
-                "",
-                solicitud.encabezado.banco,
-                "",
-                "",
-                movimiento.referencia or "",
-                "",
-                "",
-                "",
             ],
-            # Los codigos van centrados (col. B, H, J, K, M, P, Q) aunque hoy
-            # salgan vacios: el spec pide centrar fechas y codigos.
-            centradas={1, 7, 9, 10, 12, 15, 16},
+            centradas={1},
         )
-        # El banco acumula credito - debito; la primera fila arranca en cero.
+        # El extracto acumula credito - debito; la primera fila arranca en cero.
         if fila == primer_dato:
-            formula = f"=E{fila}-D{fila}"
+            formula = f"=D{fila}-C{fila}"
         else:
-            formula = f"=F{fila - 1}+E{fila}-D{fila}"
-        _celda_formula(hoja, fila, 6, formula)
-        debe = _importe(movimiento.debe)
-        haber = _importe(movimiento.haber)
+            formula = f"=E{fila - 1}+D{fila}-C{fila}"
+        _celda_formula(hoja, fila, 5, formula)
         if es_pendiente and es_gasto_bancario(movimiento.concepto):
             # Es uno de los debitos automaticos de la Seccion 3 del Libro Mayor:
-            # su celda de origen va en verde claro.
-            _pintar_importe(hoja, fila, debe, 0.0, RELLENO_PENDIENTE_BANCO)
+            # su celda de origen (la del debito) va en verde claro.
+            _pintar_importe(hoja, fila, debe, 0.0, RELLENO_PENDIENTE_BANCO, 3, 4)
         elif not es_pendiente and (debe or haber):
             # Cruzo contra el mayor: el importe va en amarillo.
-            _pintar_importe(hoja, fila, debe, haber, RELLENO_CONCILIADO)
+            _pintar_importe(hoja, fila, debe, haber, RELLENO_CONCILIADO, 3, 4)
         fila += 1
 
     if fila > primer_dato:
-        # Una sola fila de totalizacion al pie del extracto. Sin "Control de
-        # diferencia" ni referencias al Libro Mayor: el spec los saco de esta
-        # pestana.
+        # Una sola fila de totalizacion al pie del extracto: la suma de debitos
+        # (col. C), la de creditos (col. D) y el saldo de la ultima fila. Sin
+        # "Control de diferencia" ni referencias al Libro Mayor.
         ultima = fila - 1
         _titulo_seccion(hoja, fila, "TOTALES")
+        _celda_formula(hoja, fila, 3, f"=SUM(C{primer_dato}:C{ultima})")
         _celda_formula(hoja, fila, 4, f"=SUM(D{primer_dato}:D{ultima})")
-        _celda_formula(hoja, fila, 5, f"=SUM(E{primer_dato}:E{ultima})")
-        _celda_formula(hoja, fila, 6, f"=F{ultima}")
+        _celda_formula(hoja, fila, 5, f"=E{ultima}")
 
 
 # ----------------------------------------------------------------------

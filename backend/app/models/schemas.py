@@ -186,8 +186,9 @@ class MovimientoMayorExport(BaseModel):
 class MovimientoBancoExport(BaseModel):
     """Una fila del extracto para la pestana "Movimientos Bancarios".
 
-    El spec pide 17 columnas de extracto; hoy solo hay dato para fecha,
-    concepto, debito, credito, saldo, referencia y banco.
+    La pestana "Movimientos Bancarios" muestra el extracto resumido en cinco
+    columnas: fecha, concepto, debito, credito y saldo. El modelo conserva
+    ademas referencia, que el exportador usa para deduplicar lineas repetidas.
     """
 
     fecha: Optional[date] = None

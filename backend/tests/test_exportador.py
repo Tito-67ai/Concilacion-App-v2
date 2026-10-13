@@ -6,7 +6,8 @@ un archivo que se abre y esta vacio pasa cualquier prueba de bytes.
 
 La estructura que se prueba es la del formulario: membrete en las filas 1-6,
 Tabla 1 (mayor completo con saldo por formula), Tabla 2 y Tabla 3 de partidas
-pendientes, pie de control y, en la segunda hoja, el extracto en 17 columnas.
+pendientes, pie de control y, en la segunda hoja, el extracto resumido en cinco
+columnas (fecha, concepto, debito, credito y saldo).
 """
 
 import io
@@ -286,52 +287,41 @@ def test_el_pie_compara_el_saldo_ajustado_con_el_del_extracto():
 # ----------------------------------------------------------------------
 
 
-def test_la_hoja_de_movimientos_tiene_las_17_columnas_del_extracto():
+def test_la_hoja_de_movimientos_tiene_solo_las_cinco_columnas_del_resumen():
     hoja = _movimientos(exportador.exportar(_solicitud()))
 
     esperadas = [
         "Fecha contable",
-        "Cod de Concepto",
         "Concepto",
         "Debito en $",
         "Credito en $",
         "Saldo en $",
-        "Informacion Complementaria",
-        "Nro de cheque",
-        "Sucursal Origen",
-        "Canal",
-        "Banco",
-        "CBU/Alias",
-        "Tipo trf",
-        "Referencia",
-        "Nombre",
-        "Tipo doc",
-        "Nro doc",
     ]
-    leidas = [hoja.cell(row=8, column=i + 1).value for i in range(17)]
+    leidas = [hoja.cell(row=8, column=i + 1).value for i in range(5)]
 
     assert leidas == esperadas
+    # Las columnas que sobraban (codigos, banco, referencia, etc.) ya no van.
+    assert hoja.cell(row=8, column=6).value is None
 
 
 def test_la_hoja_de_movimientos_vuelca_todo_el_extracto():
     hoja = _movimientos(exportador.exportar(_solicitud()))
 
     assert _celda(hoja, "A9") == date(2026, 7, 2)
-    assert hoja["C9"].value == "COBRO"
-    assert hoja["D9"].value == 0
-    assert hoja["E9"].value == 1000
-    assert hoja["K9"].value == "SANT"
+    assert hoja["B9"].value == "COBRO"
+    assert hoja["C9"].value == 0
+    assert hoja["D9"].value == 1000
 
     assert _celda(hoja, "A10") == date(2026, 7, 5)
-    assert hoja["C10"].value == "COMISION"
-    assert hoja["D10"].value == 150
+    assert hoja["B10"].value == "COMISION"
+    assert hoja["C10"].value == 150
 
 
 def test_la_hoja_de_movimientos_acumula_credito_menos_debito():
     hoja = _movimientos(exportador.exportar(_solicitud()))
 
-    assert hoja["F9"].value == "=E9-D9"
-    assert hoja["F10"].value == "=F9+E10-D10"
+    assert hoja["E9"].value == "=D9-C9"
+    assert hoja["E10"].value == "=E9+D10-C10"
 
 
 def test_la_hoja_de_movimientos_totaliza_debitos_y_creditos():
@@ -340,9 +330,9 @@ def test_la_hoja_de_movimientos_totaliza_debitos_y_creditos():
     # Una sola fila "TOTALES" al pie del extracto: suma de la columna Debito,
     # suma de la columna Credito y el saldo de la ultima fila.
     assert hoja["A11"].value == "TOTALES"
+    assert hoja["C11"].value == "=SUM(C9:C10)"
     assert hoja["D11"].value == "=SUM(D9:D10)"
-    assert hoja["E11"].value == "=SUM(E9:E10)"
-    assert hoja["F11"].value == "=F10"
+    assert hoja["E11"].value == "=E10"
 
 
 def test_la_hoja_de_movimientos_no_lleva_control_de_diferencia():
@@ -368,9 +358,9 @@ def test_la_hoja_de_movimientos_escribe_una_sola_vez_las_lineas_repetidas():
 
     # La comision repetida se escribe una sola vez y el TOTALES queda en la
     # primera fila libre (11), no en la 12.
-    assert hoja["C10"].value == "COMISION"
+    assert hoja["B10"].value == "COMISION"
     assert hoja["A11"].value == "TOTALES"
-    assert hoja["D11"].value == "=SUM(D9:D10)"
+    assert hoja["C11"].value == "=SUM(C9:C10)"
 
 
 # ----------------------------------------------------------------------
@@ -443,12 +433,13 @@ def test_una_fila_del_mayor_sin_cruzar_no_se_pinta():
 def test_la_hoja_de_movimientos_pinta_conciliados_y_pendientes():
     hoja = _movimientos(exportador.exportar(_solicitud()))
 
-    # COBRO (fila 9) cruzo: su haber va en amarillo. COMISION (fila 10) es un
-    # debito pendiente de registracion contable: su debe va en verde claro.
-    assert hoja["E9"].fill.fgColor.rgb == "FFFFFF00"
-    assert hoja["D9"].fill.patternType is None
-    assert hoja["D10"].fill.fgColor.rgb == "FF93C47D"
-    assert hoja["E10"].fill.patternType is None
+    # COBRO (fila 9) cruzo: su credito (col. D) va en amarillo. COMISION (fila
+    # 10) es un debito pendiente de registracion contable: su debito (col. C) va
+    # en verde claro.
+    assert hoja["D9"].fill.fgColor.rgb == "FFFFFF00"
+    assert hoja["C9"].fill.patternType is None
+    assert hoja["C10"].fill.fgColor.rgb == "FF93C47D"
+    assert hoja["D10"].fill.patternType is None
 
 
 def test_la_hoja_de_movimientos_no_pinta_un_pendiente_que_no_es_gasto():
@@ -467,6 +458,7 @@ def test_la_hoja_de_movimientos_no_pinta_un_pendiente_que_no_es_gasto():
     )
 
     # Un pago pendiente no es un gasto del banco: no lleva el verde de la Seccion 3.
+    assert hoja["C10"].fill.patternType is None
     assert hoja["D10"].fill.patternType is None
 
 
@@ -477,14 +469,18 @@ def test_las_columnas_de_importe_entran_los_numeros_y_no_quedan_en_piquitos():
     contenido = exportador.exportar(_solicitud())
     libro = _libro(contenido)
 
-    for hoja in libro.worksheets:
-        for columna in ("D", "E", "F"):
+    # El mayor guarda los importes en D/E/F; el extracto, en C/D/E.
+    for hoja, columnas in (
+        (_mayor(contenido), ("D", "E", "F")),
+        (_movimientos(contenido), ("C", "D", "E")),
+    ):
+        for columna in columnas:
             ancho = hoja.column_dimensions[columna].width
             assert ancho is not None and ancho >= 18, (hoja.title, columna, ancho)
 
     for hoja, coordenadas in (
         (_mayor(contenido), ("D10", "E10", "F10")),
-        (_movimientos(contenido), ("D9", "E9", "F10")),
+        (_movimientos(contenido), ("C9", "D9", "E10")),
     ):
         for coordenada in coordenadas:
             assert hoja[coordenada].number_format == FORMATO_CONTABLE

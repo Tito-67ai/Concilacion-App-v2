@@ -17,7 +17,9 @@ import re
 
 from app.services.sesion_xubio_bot import (
     clic_continuar_sesion_activa,
+    escribir_env,
     extraer_codigos_reportes,
+    leer_env,
 )
 
 
@@ -213,3 +215,53 @@ def test_sin_codigos_devuelve_none_sin_inventar():
 def test_no_toma_cualquier_numero_como_empresa():
     # Un id de cliente suelto no es el codigo de empresa del reporte.
     assert extraer_codigos_reportes('{"id": 5261262}') == (None, None)
+
+
+# --------------------------------------------------------------------------
+# Escritura del .env
+#
+# En un clon nuevo el .env no existe (esta en .gitignore): el login del panel
+# tiene que poder crearlo solo, y arrancar del .env.example para no perder los
+# defaults ni los comentarios. Antes cortaba con "No existe ... .env".
+# --------------------------------------------------------------------------
+
+
+def test_escribir_env_crea_el_archivo_desde_el_ejemplo(tmp_path):
+    ejemplo = tmp_path / ".env.example"
+    ejemplo.write_text(
+        "# comentario\nXUBIO_WEB_URL=https://core.xubio.com\nXUBIO_WEB_TOKEN=\n",
+        encoding="utf-8",
+    )
+    env = tmp_path / ".env"
+
+    escribir_env({"XUBIO_WEB_TOKEN": "309-token"}, env)
+
+    assert env.exists()
+    contenido = env.read_text(encoding="utf-8")
+    # Conserva el default y el comentario del ejemplo...
+    assert "# comentario" in contenido
+    assert "XUBIO_WEB_URL=https://core.xubio.com" in contenido
+    # ...y reemplaza la clave pedida.
+    assert "XUBIO_WEB_TOKEN=309-token" in contenido
+    assert leer_env(env)["XUBIO_WEB_TOKEN"] == "309-token"
+
+
+def test_escribir_env_crea_de_cero_sin_ejemplo(tmp_path):
+    env = tmp_path / ".env"
+
+    escribir_env({"XUBIO_EMAIL": "a@b.com"}, env)
+
+    assert leer_env(env) == {"XUBIO_EMAIL": "a@b.com"}
+    assert env.read_text(encoding="utf-8").endswith("\n")
+
+
+def test_escribir_env_agrega_claves_nuevas_sin_tocar_lo_demas(tmp_path):
+    env = tmp_path / ".env"
+    env.write_text("XUBIO_WEB_URL=https://core.xubio.com\n", encoding="utf-8")
+
+    escribir_env({"XUBIO_WEB_TOKEN": "309", "XUBIO_WEB_COOKIE": "s=1"}, env)
+
+    contenido = env.read_text(encoding="utf-8")
+    assert contenido.startswith("XUBIO_WEB_URL=https://core.xubio.com\n")
+    assert "XUBIO_WEB_TOKEN=309" in contenido
+    assert "XUBIO_WEB_COOKIE=s=1" in contenido

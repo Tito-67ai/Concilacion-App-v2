@@ -128,13 +128,22 @@ def leer_env(path: Path) -> dict[str, str]:
 def escribir_env(actualizar: dict[str, str], path: Path) -> None:
     """Actualiza claves del .env conservando el resto y el orden.
 
+    Si el .env todavia no existe se arranca del .env.example: es lo normal en
+    un clon nuevo (el .env esta en .gitignore) y sin esto el login fallaba con
+    "No existe ... .env". Del ejemplo se conservan los defaults y los
+    comentarios; si tampoco esta el ejemplo, se crea de cero.
+
     Los archivos locales de Xubio pueden tener nombres de cuenta con acentos;
     siempre se lee y escribe con encoding utf-8 explicito.
     """
-    if not path.exists():
-        raise FileNotFoundError(f"No existe {path}. Copialo desde .env.example.")
+    existia = path.exists()
+    if existia:
+        contenido = path.read_text(encoding="utf-8")
+    else:
+        ejemplo = path.with_name(".env.example")
+        contenido = ejemplo.read_text(encoding="utf-8") if ejemplo.exists() else ""
 
-    lineas = path.read_text(encoding="utf-8").splitlines()
+    lineas = contenido.splitlines()
     claves_vistas: set[str] = set()
     resultado: list[str] = []
     for linea in lineas:
@@ -148,9 +157,9 @@ def escribir_env(actualizar: dict[str, str], path: Path) -> None:
         if clave not in claves_vistas:
             resultado.append(f"{clave}={valor}")
 
-    # Si el archivo terminaba en newline, respetarlo (si no, no agregar).
-    original = path.read_text(encoding="utf-8")
-    termina = "\n" if original.endswith("\n") else ""
+    # Si el archivo terminaba en newline, respetarlo. Un .env recien creado
+    # siempre cierra con newline.
+    termina = "\n" if (not existia or contenido.endswith("\n")) else ""
     path.write_text("\n".join(resultado) + termina, encoding="utf-8")
 
 

@@ -214,11 +214,12 @@ def _escribir_fila(
             celda.font = fuente
 
 
-def _escribir_encabezados(hoja: Worksheet, fila: int, columnas: list[str], columna_base: int = 1) -> None:
+def _escribir_encabezados(hoja: Worksheet, fila: int, columnas: list[str], columna_base: int = 1, con_relleno: bool = True) -> None:
     for i, nombre in enumerate(columnas):
         celda = hoja.cell(row=fila, column=columna_base + i, value=nombre)
         celda.font = FUENTE_ENCABEZADO
-        celda.fill = RELLENO_ENCABEZADO
+        if con_relleno:
+            celda.fill = RELLENO_ENCABEZADO
         celda.alignment = ALINEACION_CENTRO
 
 
@@ -271,7 +272,7 @@ def _armar_libro_mayor(hoja: Worksheet, solicitud: SolicitudExportacion, pendien
         hoja.column_dimensions[col].width = ancho
 
     # Encabezados en fila 9
-    _escribir_encabezados(hoja, FILA_ENCABEZADO_MAYOR, COLUMNAS_MAYOR)
+    _escribir_encabezados(hoja, FILA_ENCABEZADO_MAYOR, COLUMNAS_MAYOR, con_relleno=False)
 
     # Fila Saldo Inicial (10)
     fila = FILA_SALDO_INICIAL_MAYOR

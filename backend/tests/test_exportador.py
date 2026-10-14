@@ -90,7 +90,8 @@ def test_libro_mayor_tiene_encabezados_correctos():
         assert hoja.cell(row=9, column=i).value == nombre
         celda = hoja.cell(row=9, column=i)
         assert celda.font.bold
-        assert celda.fill.fgColor.rgb == "FF00B0F0"
+        assert celda.fill.fgColor.rgb == "00000000"  # sin relleno azul
+        assert celda.font.color.rgb == "00FFFFFF"  # fuente blanca
 
 
 def test_libro_mayor_saldo_inicial_en_fila_10():
@@ -278,12 +279,15 @@ def test_importes_formato_contable_dos_decimales():
 
 def test_encabezados_resaltados_azul():
     hoja = _mayor(exportador.exportar(_solicitud()))
+    # Libro Mayor: headers SIN relleno azul (transparente)
     for col in range(1, 10):
         c = hoja.cell(row=9, column=col)
-        assert c.fill.fgColor.rgb == "FF00B0F0"
+        assert c.fill.fgColor.rgb == "00000000"  # sin relleno
         assert c.font.bold
+        assert c.font.color.rgb == "00FFFFFF"  # fuente blanca (con alpha)
 
     hoja2 = _movimientos(exportador.exportar(_solicitud()))
+    # Movimientos Bancarios: headers CON relleno azul
     for col in range(1, 6):
         c = hoja2.cell(row=8, column=col)
         assert c.fill.fgColor.rgb == "FF00B0F0"

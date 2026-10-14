@@ -127,10 +127,12 @@ ANCHOS_MOV = {"A": 14.0, "B": 45.0, "C": 18.0, "D": 18.0, "E": 18.0, "I": 16.0, 
 
 RELLENO_ENCABEZADO = PatternFill("solid", fgColor="FF00B0F0")
 RELLENO_CONCILIADO = PatternFill("solid", fgColor="FFFFFF00")     # amarillo: tiene coincidencia
-RELLENO_NO_CONCILIADO = PatternFill("solid", fgColor="FF93C47D")  # verde: sin coincidencia (pendiente)
-# Naranja reservado para "gasto del banco sin asiento". Hoy no se usa: por
-# pedido, todo lo que no tiene coincidencia se marca verde y listo.
-RELLENO_AJUSTE_CONTABLE = PatternFill("solid", fgColor="FFE69138")
+# Verde: solo para el debito del banco SIN coincidencia que es gasto o impuesto
+# bancario puro (comision, IVA, imp. ley 25.413, SIRCREB, sellado), segun la
+# jerarquia de colores de FO 02-03. El resto de los pendientes comerciales
+# queda sin color, para auditoria manual.
+RELLENO_NO_CONCILIADO = PatternFill("solid", fgColor="FF93C47D")
+RELLENO_AJUSTE_CONTABLE = PatternFill("solid", fgColor="FFE69138")  # sin uso hoy
 FUENTE_ENCABEZADO = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
 FUENTE_ENCABEZADO_OSCURO = Font(name="Calibri", size=11, bold=True)  # para fondos claros
 FUENTE_TITULO = Font(name="Calibri", size=11, bold=True)
@@ -460,12 +462,13 @@ def _armar_movimientos_bancarios(
     """Tabla de 5 columnas: Fecha | Concepto | Debito | Credito | Saldo (acumulado).
 
     Encabezado sin relleno y con filtro de Excel (A8:E{ultima fila}). En los datos
-    se marca el criterio de la conciliacion:
+    se marca el criterio de la conciliacion (jerarquia FO 02-03):
       - amarillo: el movimiento del banco tiene coincidencia (conciliado).
-      - naranja:  sin coincidencia y es gasto del banco (comision, IVA,
-                  impuesto, retencion): ajuste contable que falta asentar.
-      - verde:    sin coincidencia y no es gasto (ej. transferencia sin
-                  identificar): partida pendiente a investigar.
+      - verde:    sin coincidencia y es gasto o impuesto bancario puro
+                  (comision, IVA, imp. ley 25.413, SIRCREB, sellado): va al
+                  cuadro de partidas en banco pendientes de registracion.
+      - sin color: sin coincidencia y no es gasto (ej. transferencia sin
+                  identificar): partida comercial a auditar a mano.
     """
     # Anchos
     for col, ancho in ANCHOS_MOV.items():
@@ -511,19 +514,23 @@ def _armar_movimientos_bancarios(
         celda_saldo.number_format = FORMATO_IMPORTE
         celda_saldo.alignment = ALINEACION_DERECHA
 
-        # Resaltar según tenga o no coincidencia:
-        #   amarillo (RELLENO_CONCILIADO): tiene coincidencia (conciliado)
-        #   verde (RELLENO_NO_CONCILIADO): sin coincidencia (pendiente)
-        # Por ahora todo lo que no tiene coincidencia va verde, sin distinguir
-        # si es gasto bancario (antes ese caso iba en naranja).
+        # Jerarquia de colores FO 02-03 (pestana Movimientos Bancarios):
+        #   amarillo: el movimiento cruzo contra el Libro Mayor (conciliado).
+        #   verde:    debito del banco SIN coincidencia y que es gasto o
+        #             impuesto bancario puro (comision, IVA, imp. ley 25.413,
+        #             SIRCREB, sellado). Son las partidas que van al cuadro de
+        #             pendientes de registracion contable.
+        #   sin color: operacion comercial sin match, a auditoria manual.
         clave = _clave_banco(mov.fecha, mov.concepto, mov.debe, mov.haber)
         es_pendiente = pendientes_banco_counter.get(clave, 0) > 0
-        if es_pendiente:
-            pendientes_banco_counter[clave] -= 1
-            relleno = RELLENO_NO_CONCILIADO
-        else:
+        if not es_pendiente:
             relleno = RELLENO_CONCILIADO
-        if debe or haber:
+        else:
+            pendientes_banco_counter[clave] -= 1
+            relleno = (
+                RELLENO_NO_CONCILIADO if es_gasto_bancario(mov.concepto) else None
+            )
+        if relleno is not None and (debe or haber):
             for col_idx in (3, 4):  # C, D
                 c = hoja.cell(row=fila, column=col_idx)
                 if c.value is not None:
@@ -683,7 +690,8 @@ def exportar(solicitud: SolicitudExportacion) -> bytes:
             for p in solicitud.pendientes_banco
         )
 
-        # Criterio de color: coincidencia = amarillo, sin coincidencia = verde.
+        # Colores FO 02-03: coincidencia = amarillo; sin coincidencia = verde
+        # solo si es gasto/impuesto bancario, el resto queda sin color.
         _armar_libro_mayor(mayor, solicitud, pendientes_xubio)
         _armar_movimientos_bancarios(movimientos, solicitud, pendientes_banco)
         _armar_cuadro_subcategorias(movimientos, FILA_ENCABEZADO_MOV, solicitud.pendientes_banco)

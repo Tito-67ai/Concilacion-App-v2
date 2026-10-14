@@ -11,9 +11,14 @@ Hoja "Movimientos Bancarios":
     Fila 10+: todos los movimientos del extracto (sin repetidos), debito=negativo, credito=positivo, saldo acumulado
     Encabezado sin relleno y con filtro de Excel (A8:E...).
 
-Colores (ambas hojas):
-    Amarillo (FFFFFF00) = el movimiento tiene coincidencia (conciliado)
-    Verde (FF93C47D)    = sin coincidencia (partida pendiente)
+Colores:
+    Libro Mayor:
+        Amarillo (FFFFFF00) = el movimiento tiene coincidencia (conciliado)
+        Verde (FF93C47D)    = sin coincidencia (partida pendiente)
+    Movimientos Bancarios (jerarquia FO 02-03):
+        Amarillo (FFFFFF00) = el movimiento tiene coincidencia (conciliado)
+        Verde (FF93C47D)    = sin coincidencia y es gasto/impuesto bancario
+        Sin color           = sin coincidencia y es comercial (a auditar)
 """
 
 import io
@@ -275,15 +280,34 @@ def test_movimientos_bancarios_encabezados_sin_relleno():
         assert not c.fill.fill_type, f"{c.coordinate} no deberia tener relleno"
 
 
-def test_movimientos_bancarios_conciliados_en_amarillo_pendientes_en_verde():
+def test_movimientos_bancarios_conciliados_en_amarillo_gastos_en_verde():
     hoja = _movimientos(exportador.exportar(_solicitud()))
     # COBRO (fila 10) y PAGO PROVEEDOR (fila 13) tienen coincidencia -> amarillo
     assert hoja["D10"].fill.fgColor.rgb == "FFFFFF00"
     assert hoja["C13"].fill.fgColor.rgb == "FFFFFF00"
-    # COMISION (fila 11) e IVA (fila 12) no tienen coincidencia -> verde, sin
-    # distinguir si son gastos bancarios (por ahora todo lo pendiente va verde)
+    # COMISION (fila 11) e IVA (fila 12) no tienen coincidencia pero son gasto
+    # bancario -> verde (van al cuadro de partidas pendientes de registracion).
     assert hoja["C11"].fill.fgColor.rgb == "FF93C47D"
     assert hoja["C12"].fill.fgColor.rgb == "FF93C47D"
+
+
+def test_movimientos_bancarios_comercial_sin_match_queda_sin_color():
+    # Un debito comercial (transferencia) sin coincidencia NO es gasto bancario:
+    # no debe pintarse, queda sin color para auditoria manual (regla FO 02-03).
+    sol = _solicitud(
+        pendientes_banco=[
+            {"origen": "banco", "fecha": "2026-07-07", "concepto": "TRANSFERENCIA", "referencia": "OP-11", "debe": 500, "haber": 0},
+        ],
+        movimientos_banco=[
+            {"fecha": "2026-07-02", "concepto": "COBRO", "haber": 1000, "saldo": 1000, "referencia": "REF-1"},
+            {"fecha": "2026-07-07", "concepto": "TRANSFERENCIA", "debe": 500, "saldo": 500, "referencia": "OP-11"},
+        ],
+    )
+    hoja = _movimientos(exportador.exportar(sol))
+    # fila 10 COBRO conciliado -> amarillo; fila 11 TRANSFERENCIA pendiente
+    # comercial -> sin relleno.
+    assert hoja["D10"].fill.fgColor.rgb == "FFFFFF00"
+    assert not hoja["C11"].fill.fill_type, "el pendiente comercial no debe pintarse"
 
 
 def test_movimientos_bancarios_tiene_filtro():

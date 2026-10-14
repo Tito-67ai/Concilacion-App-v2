@@ -5,6 +5,7 @@ import { provideRouter, Router } from '@angular/router';
 
 import { ConciliacionComponent } from './conciliacion';
 import { ImportacionService } from '../../servicios/importacion.service';
+import { RespuestaConciliacionAvanzada } from '../../modelos/conciliacion';
 
 const API = 'http://127.0.0.1:8000/api';
 
@@ -667,6 +668,58 @@ describe('ConciliacionComponent', () => {
 
     http.expectNone(`${API}/conciliacion/cruzar`);
     expect(component.errorMensaje).toContain('Libro Mayor');
+  });
+
+  /** Respuesta avanzada minima: alcanza para dibujar el cuadro de gastos. */
+  function analisisAvanzadoDePrueba(): RespuestaConciliacionAvanzada {
+    return {
+      exito: true,
+      conciliados: [],
+      ajustes_contables: [],
+      partidas_pendientes: [],
+      cuadro_control: {
+        ingresos: { empresa_total: 0, banco_total: 0, conciliados: 0, diferencia_neta: 0 },
+        egresos: { empresa_total: 0, banco_total: 0, conciliados: 0, diferencia_neta: 0 },
+        ajustes_contables: { total: -350, cantidad: 1 },
+        partidas_pendientes: { banco_cantidad: 0, mayor_cantidad: 0, total_mayor: 0 },
+        conciliados: { cantidad: 0, total_ingresos: 0, total_egresos: 0 },
+      },
+      tabla_dinamica_gastos: [
+        {
+          concepto: 'COM MANT CT',
+          suma_credito: 0,
+          suma_debito: -350,
+          suma: 350,
+          cantidad: 1,
+          porcentaje: 100,
+          porcentaje_acumulado: 100,
+        },
+      ],
+      estadisticas: {
+        total_movimientos_banco: 1,
+        total_movimientos_mayor: 0,
+        conciliados: 0,
+        ajustes_contables: 1,
+        pendientes_banco: 0,
+        pendientes_mayor: 0,
+        porcentaje_conciliado: 0,
+      },
+    };
+  }
+
+  it('el cuadro de gastos bancarios suma crédito y débito por concepto', async () => {
+    component.analisisAvanzado = analisisAvanzadoDePrueba();
+    await fixture.whenStable();
+
+    const texto = fixture.nativeElement.textContent;
+    expect(texto).toContain('Cuadro de gastos bancarios');
+    expect(texto).toContain('SUM de Crédito');
+    expect(texto).toContain('SUM de Débito en $');
+    expect(texto).toContain('COM MANT CT');
+    // El débito va en negativo y el crédito en cero se muestra igual.
+    expect(texto).toContain('-350,00');
+    expect(texto).toContain('0,00');
+    expect(texto).toContain('Suma total');
   });
 
   it('con el archivo cargado el boton del Libro Mayor muestra cuantas filas trajo', async () => {

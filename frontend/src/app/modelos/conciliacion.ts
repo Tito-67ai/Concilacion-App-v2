@@ -296,9 +296,14 @@ export interface PartidaPendiente {
   nombre_tercero?: string | null;
 }
 
-/** Una fila de la tabla dinamica de gastos bancarios (mismo concepto sumado). */
+/** Una fila del cuadro de gastos bancarios (mismo concepto sumado). */
 export interface GastoBancarioResumen {
   concepto: string;
+  /** Total de créditos del concepto (positivo). */
+  suma_credito: number;
+  /** Total de débitos del concepto (negativo: es una salida). */
+  suma_debito: number;
+  /** Valor absoluto, solo para ordenar. */
   suma: number;
   cantidad: number;
   porcentaje: number;

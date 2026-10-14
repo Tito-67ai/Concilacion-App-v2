@@ -207,11 +207,27 @@ class TestTablaDinamicaGastos:
         tabla = _tabla_dinamica_gastos(ajustes)
 
         # Debe agrupar por concepto original normalizado
-        conceptos = {row["concepto"]: row["suma"] for row in tabla}
-        assert conceptos["COMISION"] == 200.0  # 150 + 50
-        assert conceptos["IVA"] == 200.0
-        assert conceptos["ING BRUTOS PERCEP"] == 250.0
+        por_concepto = {row["concepto"]: row for row in tabla}
+        assert por_concepto["COMISION"]["suma"] == 200.0  # 150 + 50
+        assert por_concepto["IVA"]["suma"] == 200.0
+        assert por_concepto["ING BRUTOS PERCEP"]["suma"] == 250.0
         assert abs(sum(row["suma"] for row in tabla) - 650.0) < 0.01
+        # Los gastos del banco son débitos: la suma de débito va en negativo.
+        assert por_concepto["COMISION"]["suma_debito"] == -200.0
+        assert por_concepto["COMISION"]["suma_credito"] == 0.0
+
+    def test_tabla_dinamica_separa_credito_y_debito(self):
+        """Un concepto puede tener crédito y débito: se suman por separado."""
+        ajustes = [
+            {"origen": "ajuste_contable", "concepto": "IMP S/CRED CT", "debito": 300, "credito": 0},
+            {"origen": "ajuste_contable", "concepto": "IMP S/CRED CT", "debito": 0, "credito": 45},
+        ]
+        tabla = _tabla_dinamica_gastos(ajustes)
+
+        fila = tabla[0]
+        assert fila["concepto"] == "IMP S/CRED CT"
+        assert fila["suma_credito"] == 45.0
+        assert fila["suma_debito"] == -300.0
 
     def test_tabla_dinamica_orden_descendente(self):
         ajustes = [

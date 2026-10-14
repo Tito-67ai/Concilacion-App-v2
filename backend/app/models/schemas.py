@@ -500,7 +500,14 @@ class CuadroControl(BaseModel):
 
 
 class TablaDinamicaGasto(BaseModel):
+    """Una fila del cuadro de gastos bancarios: un concepto con sus sumas.
+
+    `suma_debito` va en negativo (es una salida) y `suma` es el valor absoluto,
+    que solo se usa para ordenar de mayor a menor.
+    """
     concepto: str
+    suma_credito: float = 0.0
+    suma_debito: float = 0.0
     suma: float
     cantidad: int
     porcentaje: float

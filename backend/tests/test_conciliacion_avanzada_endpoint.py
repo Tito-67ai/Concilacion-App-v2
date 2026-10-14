@@ -85,7 +85,12 @@ def test_cruzar_avanzado_tabla_dinamica_gastos():
     assert len(data["ajustes_contables"]) >= 1
     assert len(data["tabla_dinamica_gastos"]) >= 1
     tabla = data["tabla_dinamica_gastos"]
-    assert all(k in tabla[0] for k in ("concepto", "suma", "cantidad", "porcentaje", "porcentaje_acumulado"))
+    assert all(k in tabla[0] for k in (
+        "concepto", "suma_credito", "suma_debito", "suma", "cantidad",
+        "porcentaje", "porcentaje_acumulado",
+    ))
+    # La comisión es un débito: la suma de débito va en negativo.
+    assert tabla[0]["suma_debito"] < 0
 
 
 def test_cruzar_avanzado_sin_banco_devuelve_400():

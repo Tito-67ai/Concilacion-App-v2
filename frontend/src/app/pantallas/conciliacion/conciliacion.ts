@@ -15,6 +15,7 @@ import {
   Afiliado,
   AfiliadoConConciliaciones,
   CruceAfiliadoMovimiento,
+  GastoBancarioResumen,
   MovimientoBanco,
   MovimientoMayor,
   ParConciliado,
@@ -1770,6 +1771,36 @@ export class ConciliacionComponent implements OnInit {
         (p) => p.origen === 'pendiente_banco'
       ) ?? []
     );
+  }
+
+  /**
+   * El cuadro de gastos bancarios: una fila por concepto del extracto, con la
+   * suma de crédito y de débito. Es la tabla dinámica que se registra en la
+   * contabilidad (comisiones, IVA, impuestos, sellados, etc.).
+   */
+  get gastosBancarios(): GastoBancarioResumen[] {
+    return this.analisisAvanzado?.tabla_dinamica_gastos ?? [];
+  }
+
+  /** Total de créditos del cuadro, para la fila "Suma total". */
+  get totalCreditoGastos(): number {
+    return this.gastosBancarios.reduce((suma, fila) => suma + fila.suma_credito, 0);
+  }
+
+  /** Total de débitos del cuadro (negativo), para la fila "Suma total". */
+  get totalDebitoGastos(): number {
+    return this.gastosBancarios.reduce((suma, fila) => suma + fila.suma_debito, 0);
+  }
+
+  /**
+   * Importe del cuadro de gastos.
+   *
+   * A diferencia del resto de la pantalla, acá el cero SÍ se muestra ("0,00"):
+   * la tabla dinámica del banco deja explícitas las dos columnas aunque una
+   * quede en cero.
+   */
+  formatoImporteCuadro(valor: number | null | undefined): string {
+    return this.formatoImporte(valor) || '0,00';
   }
 
   /**

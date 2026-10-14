@@ -409,40 +409,64 @@ def _cuadro_control(
 
 
 def _tabla_dinamica_gastos(ajustes: list[dict]) -> list[dict]:
-    """Tabla dinámica: suma de débitos (absolutos) por concepto bancario real.
+    """Cuadro de gastos bancarios: suma de Crédito y de Débito por concepto.
 
-    Agrupa por el concepto original del movimiento (normalizado), no por categorías
-    hardcodeadas. Así el cuadro refleja exactamente lo que dice el extracto:
-    "COM MANT CT", "IVA", "IMP S/DEB CT", "ING BRUTOS PERCEP", etc.
+    Es la tabla dinámica que pide el analista: agrupa por el concepto original
+    del extracto (normalizado) y no por categorías hardcodeadas, así el cuadro
+    refleja exactamente lo que dice el banco: "COM MANT CT", "IVA",
+    "IMP S/DEB CT", "ING BRUTOS PERCEP", etc.
+
+    Por cada concepto devuelve:
+      - suma_credito: total de créditos (positivo).
+      - suma_debito:  total de débitos (negativo: es una salida de dinero).
+      - suma:         total en valor absoluto; solo ordena y mantiene la forma
+                      anterior de la respuesta.
     """
-    sumas: dict[str, Decimal] = defaultdict(Decimal)
+    creditos: dict[str, Decimal] = defaultdict(Decimal)
+    debitos: dict[str, Decimal] = defaultdict(Decimal)
     conteos: dict[str, int] = defaultdict(int)
 
     for a in ajustes:
-        if a["importe"] >= 0:
-            continue  # solo egresos (importe negativo en convención banco)
         concepto_original = (a.get("concepto", "") or "").strip()
-        # Normalizar: quitar espacios múltiples, mayúsculas
+        # Normalizar: quitar espacios múltiples y pasar a mayúsculas.
         concepto_norm = " ".join(concepto_original.upper().split())
         if not concepto_norm:
             concepto_norm = "SIN CONCEPTO"
-        monto = abs(Decimal(str(a["importe"])))
-        sumas[concepto_norm] += monto
+
+        # `importe` viene en convención banco: positivo = crédito (entrada),
+        # negativo = débito (salida). Si el movimiento trae los campos
+        # separados se usan esos; si no, se deduce del importe.
+        debito = _dec(a.get("debito"))
+        credito = _dec(a.get("credito"))
+        if not debito and not credito:
+            importe = _dec(a.get("importe"))
+            if importe < 0:
+                debito = -importe
+            elif importe > 0:
+                credito = importe
+
+        creditos[concepto_norm] += credito
+        debitos[concepto_norm] += debito
         conteos[concepto_norm] += 1
 
-    # Ordenar por monto descendente
-    items = sorted(sumas.items(), key=lambda x: x[1], reverse=True)
+    # Un concepto puede tener solo crédito, solo débito o ambos. Se ordena por
+    # magnitud (mayor primero), como la tabla del banco.
+    conceptos = set(creditos) | set(debitos)
+    absolutos = {c: creditos[c] + debitos[c] for c in conceptos}
+    items = sorted(conceptos, key=lambda c: absolutos[c], reverse=True)
 
-    total = sum(sumas.values())
+    total = sum(absolutos.values())
     acum = Decimal("0")
     resultado = []
-    for concepto, monto in items:
-        acum += monto
+    for concepto in items:
+        acum += absolutos[concepto]
         resultado.append({
             "concepto": concepto,
-            "suma": float(monto.quantize(CENTAVO)),
+            "suma_credito": float(creditos[concepto].quantize(CENTAVO)),
+            "suma_debito": float((-debitos[concepto]).quantize(CENTAVO)),
+            "suma": float(absolutos[concepto].quantize(CENTAVO)),
             "cantidad": conteos[concepto],
-            "porcentaje": float((monto / total * 100).quantize(CENTAVO)) if total else 0,
+            "porcentaje": float((absolutos[concepto] / total * 100).quantize(CENTAVO)) if total else 0,
             "porcentaje_acumulado": float((acum / total * 100).quantize(CENTAVO)) if total else 0,
         })
     return resultado

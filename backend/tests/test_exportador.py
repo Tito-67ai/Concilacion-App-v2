@@ -275,15 +275,15 @@ def test_movimientos_bancarios_encabezados_sin_relleno():
         assert not c.fill.fill_type, f"{c.coordinate} no deberia tener relleno"
 
 
-def test_movimientos_bancarios_tres_colores_segun_criterio():
+def test_movimientos_bancarios_conciliados_en_amarillo_pendientes_en_verde():
     hoja = _movimientos(exportador.exportar(_solicitud()))
     # COBRO (fila 10) y PAGO PROVEEDOR (fila 13) tienen coincidencia -> amarillo
     assert hoja["D10"].fill.fgColor.rgb == "FFFFFF00"
     assert hoja["C13"].fill.fgColor.rgb == "FFFFFF00"
-    # COMISION (fila 11) e IVA (fila 12) son pendientes del banco Y son gastos
-    # bancarios -> naranja (ajuste contable que falta registrar en Xubio)
-    assert hoja["C11"].fill.fgColor.rgb == "FFE69138"
-    assert hoja["C12"].fill.fgColor.rgb == "FFE69138"
+    # COMISION (fila 11) e IVA (fila 12) no tienen coincidencia -> verde, sin
+    # distinguir si son gastos bancarios (por ahora todo lo pendiente va verde)
+    assert hoja["C11"].fill.fgColor.rgb == "FF93C47D"
+    assert hoja["C12"].fill.fgColor.rgb == "FF93C47D"
 
 
 def test_movimientos_bancarios_tiene_filtro():

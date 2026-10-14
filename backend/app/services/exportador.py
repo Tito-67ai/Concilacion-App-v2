@@ -114,7 +114,9 @@ ANCHOS_MOV = {"A": 14.0, "B": 45.0, "C": 18.0, "D": 18.0, "E": 18.0, "I": 16.0, 
 RELLENO_ENCABEZADO = PatternFill("solid", fgColor="FF00B0F0")
 RELLENO_CONCILIADO = PatternFill("solid", fgColor="FFFFFF00")     # amarillo: tiene coincidencia
 RELLENO_NO_CONCILIADO = PatternFill("solid", fgColor="FF93C47D")  # verde: sin coincidencia (pendiente)
-RELLENO_AJUSTE_CONTABLE = PatternFill("solid", fgColor="FFE69138")  # naranja: gasto del banco sin asiento
+# Naranja reservado para "gasto del banco sin asiento". Hoy no se usa: por
+# pedido, todo lo que no tiene coincidencia se marca verde y listo.
+RELLENO_AJUSTE_CONTABLE = PatternFill("solid", fgColor="FFE69138")
 FUENTE_ENCABEZADO = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
 FUENTE_ENCABEZADO_OSCURO = Font(name="Calibri", size=11, bold=True)  # para fondos claros
 FUENTE_TITULO = Font(name="Calibri", size=11, bold=True)
@@ -435,17 +437,16 @@ def _armar_movimientos_bancarios(
         celda_saldo.number_format = FORMATO_IMPORTE
         celda_saldo.alignment = ALINEACION_DERECHA
 
-        # Resaltar según el criterio de la conciliación:
+        # Resaltar según tenga o no coincidencia:
         #   amarillo (RELLENO_CONCILIADO): tiene coincidencia (conciliado)
-        #   naranja (RELLENO_AJUSTE_CONTABLE): sin coincidencia y es gasto bancario
-        #                                     (comisión, IVA, impuesto, retención) → ajuste contable
-        #   verde (RELLENO_NO_CONCILIADO): sin coincidencia y no es gasto
-        #                                     (ej. transferencia no identificada) → a investigar
+        #   verde (RELLENO_NO_CONCILIADO): sin coincidencia (pendiente)
+        # Por ahora todo lo que no tiene coincidencia va verde, sin distinguir
+        # si es gasto bancario (antes ese caso iba en naranja).
         clave = _clave_banco(mov.fecha, mov.concepto, mov.debe, mov.haber)
         es_pendiente = pendientes_banco_counter.get(clave, 0) > 0
         if es_pendiente:
             pendientes_banco_counter[clave] -= 1
-            relleno = RELLENO_AJUSTE_CONTABLE if es_gasto_bancario(mov.concepto) else RELLENO_NO_CONCILIADO
+            relleno = RELLENO_NO_CONCILIADO
         else:
             relleno = RELLENO_CONCILIADO
         if debe or haber:

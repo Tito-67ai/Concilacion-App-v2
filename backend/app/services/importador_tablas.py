@@ -104,6 +104,12 @@ ALIAS_COLUMNAS = {
         "COMPROBANTE",
         "REFERENCIABANCARIA",
     },
+    "DOCUMENTO": {
+        "DOCUMENTO",
+        "DOC",
+        "NUMERODOCUMENTO",
+        "NRODOCUMENTO",
+    },
     "CUENTA": {
         "CUENTA",
         "CTA",

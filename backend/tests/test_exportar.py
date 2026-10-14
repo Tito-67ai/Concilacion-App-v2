@@ -78,7 +78,8 @@ def test_manda_el_nombre_del_archivo_para_que_el_navegador_lo_baje():
 
     disposicion = respuesta.headers["content-disposition"]
     assert "attachment" in disposicion
-    assert 'filename="FO 02-03 ACME S.A. SANT ' in disposicion
+    # Nuevo formato: {empresa} 02-03 {banco} {fecha} ({version}).xlsx
+    assert 'filename="ACME S.A. 02-03 SANT ' in disposicion
     assert ".xlsx" in disposicion
 
     # Sin filename* el nombre llega con la tilde mojada en algunos navegadores.

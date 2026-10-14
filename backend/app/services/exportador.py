@@ -577,15 +577,45 @@ def exportar(solicitud: SolicitudExportacion) -> bytes:
 
 
 def nombre_archivo(solicitud: SolicitudExportacion, hoy: date | None = None) -> str:
+    """
+    Genera el nombre del archivo siguiendo el estándar FO 02-03:
+    {empresa} 02-03 {banco} {fecha_dd-mm-yyyy} ({version}).xlsx
+
+    Ejemplo: "PICCININI Y ASOCIADOS S.A. 02-03 ICBC 13-10-2026 (1).xlsx"
+    """
     dia = hoy or date.today()
     partes = [p for p in (solicitud.encabezado.empresa, solicitud.encabezado.banco) if p.strip()]
-    detalle = " ".join(partes).strip() or "Conciliación Bancaria"
-    limpio = "".join(c if c.isalnum() or c in " -_.&" else "" for c in detalle).strip()
-    limpio = " ".join(limpio.split())
+    if not partes:
+        empresa = "SIN_EMPRESA"
+        banco = "SIN_BANCO"
+    else:
+        empresa = partes[0].strip()
+        banco = partes[1].strip() if len(partes) > 1 else "SIN_BANCO"
+
+    # Limpieza: solo alfanumérico, espacios, guiones, puntos, ampersand
+    limpio_empresa = "".join(c if c.isalnum() or c in " -_.&" else "" for c in empresa).strip()
+    limpio_banco = "".join(c if c.isalnum() or c in " -_.&" else "" for c in banco).strip()
+    limpio_empresa = " ".join(limpio_empresa.split())
+    limpio_banco = " ".join(limpio_banco.split())
+
+    # Fecha en formato DD-MM-YYYY
     periodo = solicitud.encabezado.periodo
-    cierre = ""
     if periodo and periodo.strip():
-        cierre = "".join(c if c.isalnum() or c in " -_." else "" for c in periodo.strip()).strip()
-    if not cierre:
+        # Intentar parsear periodo como YYYY-MM o similar
+        texto = periodo.strip()
+        for fmt in ("%Y-%m", "%Y/%m", "%m/%Y", "%Y-%m-%d", "%d/%m/%Y"):
+            try:
+                fecha_parseada = datetime.strptime(texto, fmt)
+                cierre = fecha_parseada.strftime("%d-%m-%Y")
+                break
+            except ValueError:
+                continue
+        else:
+            cierre = dia.strftime("%d-%m-%Y")
+    else:
         cierre = dia.strftime("%d-%m-%Y")
-    return f"FO 02-03 {limpio} {cierre}.xlsx"
+
+    # Version: usar un contador simple basado en la fecha/hora para evitar colisiones
+    version = dia.strftime("%H%M%S")[-2:]  # últimos 2 dígitos de hora/min/seg
+
+    return f"{limpio_empresa} 02-03 {limpio_banco} {cierre} ({version}).xlsx"

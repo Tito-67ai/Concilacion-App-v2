@@ -31,11 +31,12 @@ class Settings(BaseSettings):
     XUBIO_WEB_TOKEN: str = ""
 
     # Empresa y cuenta del reporte del Libro Mayor (el POST XML a webreport).
-    # El bot de login las detecta de la sesion y las reescribe aca, asi que en
-    # general no hay que tocarlas a mano: el default es la empresa de este
-    # estudio, para no romper si el bot todavia no corrio. Si quedan vacias,
-    # el cliente se niega a pedir el reporte en vez de inventar una cuenta.
-    XUBIO_WEB_EMPRESA_REPORT_CODE: str = "29774"
+    # El bot de login las detecta de la sesion y las reescribe aca; si no las
+    # detecta, el default queda VACIO a proposito: el webreport resuelve la
+    # empresa de la sesion. Un codigo fijo de otra cuenta devolvia 0 filas sin
+    # decir por que. La cuenta si tiene un valor util por defecto (el arbol
+    # completo) para que el reporte no salga acotado a una sola cuenta.
+    XUBIO_WEB_EMPRESA_REPORT_CODE: str = ""
     XUBIO_WEB_CUENTA_REPORT_CODE: str = "ARBOL_ID=1__SEPNO__0"
 
     # El bot de sesion (sesion_xubio_bot.py) abre el navegador de Playwright

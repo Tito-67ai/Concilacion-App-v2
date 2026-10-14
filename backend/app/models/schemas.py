@@ -75,6 +75,15 @@ class MovimientoMayor(BaseModel):
     comprobante: Optional[str] = None
     debe: float = 0.0
     haber: float = 0.0
+    # Campos adicionales que el importador ya lee (documento/cuenta/organizacion
+    # del webreport y de algunos exports del contable) y que el papel de trabajo
+    # escribe en las columnas B/C/H del Libro Mayor. Sin declararlos acá, FastAPI
+    # los borraba de la respuesta de POST /conciliacion/mayor (response_model) y
+    # el Excel salía con Documento y Cuenta vacíos aunque el archivo los trajera.
+    documento: Optional[str] = None
+    cuenta: Optional[str] = None
+    organizacion: Optional[str] = None
+    descripcion: Optional[str] = None
 
     _fecha = field_validator("fecha", mode="before")(_normalizar_fecha)
 

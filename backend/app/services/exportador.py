@@ -16,6 +16,10 @@ Hoja "Movimientos Bancarios" - extracto resumido del banco:
     Fila 9      "Saldo Inicial" con el saldo en la columna E.
     Fila 10+    TODOS los movimientos del extracto (sin repetidos), debito=negativo, credito=positivo, saldo acumulado.
 
+    Encabezado sin relleno y con filtro de Excel (A8:E{ultima fila}). En los datos
+    se marca: amarillo = tiene coincidencia (conciliado); verde = no tiene
+    coincidencia (partida pendiente). El Libro Mayor usa el mismo criterio.
+
 Cuadro de sumas por subcategoria (cols I-K de Movimientos Bancarios):
     Concepto | Suma Crédito | Suma Débito
     Ingresos Brutos | X | Y
@@ -35,7 +39,7 @@ from __future__ import annotations
 
 import io
 from collections import Counter
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from openpyxl import load_workbook
@@ -108,8 +112,9 @@ ANCHOS_MOV = {"A": 14.0, "B": 45.0, "C": 18.0, "D": 18.0, "E": 18.0, "I": 16.0, 
 # ----------------------------------------------------------------------
 
 RELLENO_ENCABEZADO = PatternFill("solid", fgColor="FF00B0F0")
-RELLENO_CONCILIADO = PatternFill("solid", fgColor="FFFFFF00")
-RELLENO_PENDIENTE_BANCO = PatternFill("solid", fgColor="FF93C47D")
+RELLENO_CONCILIADO = PatternFill("solid", fgColor="FFFFFF00")     # amarillo: tiene coincidencia
+RELLENO_NO_CONCILIADO = PatternFill("solid", fgColor="FF93C47D")  # verde: sin coincidencia (pendiente)
+RELLENO_AJUSTE_CONTABLE = PatternFill("solid", fgColor="FFE69138")  # naranja: gasto del banco sin asiento
 FUENTE_ENCABEZADO = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
 FUENTE_ENCABEZADO_OSCURO = Font(name="Calibri", size=11, bold=True)  # para fondos claros
 FUENTE_TITULO = Font(name="Calibri", size=11, bold=True)
@@ -217,7 +222,10 @@ def _escribir_fila(
 def _escribir_encabezados(hoja: Worksheet, fila: int, columnas: list[str], columna_base: int = 1, con_relleno: bool = True) -> None:
     for i, nombre in enumerate(columnas):
         celda = hoja.cell(row=fila, column=columna_base + i, value=nombre)
-        celda.font = FUENTE_ENCABEZADO
+        # Con relleno azul el texto va blanco; sin relleno el fondo es blanco y
+        # el texto blanco quedaria invisible (era lo que pasaba en el Libro
+        # Mayor: los titulos, incluido "Fecha", desaparecian).
+        celda.font = FUENTE_ENCABEZADO if con_relleno else FUENTE_ENCABEZADO_OSCURO
         if con_relleno:
             celda.fill = RELLENO_ENCABEZADO
         celda.alignment = ALINEACION_CENTRO
@@ -265,6 +273,23 @@ def _sin_repetidos(movimientos: list[MovimientoBancoExport]) -> list[MovimientoB
 # Hoja LIBRO MAYOR
 # ----------------------------------------------------------------------
 
+def _fecha_saldo_inicial(solicitud: SolicitudExportacion) -> date | None:
+    """
+    Fecha de apertura para la fila "Saldo Inicial".
+
+    El modelo de auditoria la escribe un dia antes del primer movimiento (30/06
+    en un periodo que arranca el 01/07). Si no hay movimientos con fecha, se usa
+    el inicio del periodo menos un dia.
+    """
+    fechas = [f for f in (_fecha(m.fecha) for m in solicitud.movimientos_mayor) if f]
+    if fechas:
+        return min(fechas) - timedelta(days=1)
+    periodo = _periodo_a_fecha(solicitud.encabezado.periodo)
+    if periodo is not None:
+        return periodo - timedelta(days=1)
+    return None
+
+
 def _armar_libro_mayor(hoja: Worksheet, solicitud: SolicitudExportacion, pendientes_xubio: Counter) -> None:
     """Una sola tabla: Saldo Inicial + todos los movimientos del mayor ordenados por fecha."""
     # Anchos
@@ -274,11 +299,19 @@ def _armar_libro_mayor(hoja: Worksheet, solicitud: SolicitudExportacion, pendien
     # Encabezados en fila 9
     _escribir_encabezados(hoja, FILA_ENCABEZADO_MAYOR, COLUMNAS_MAYOR, con_relleno=False)
 
-    # Fila Saldo Inicial (10)
+    # Fila Saldo Inicial (10). El modelo de auditoria la escribe con la fecha de
+    # apertura (el dia anterior al primer movimiento): sin eso la fila aparecia
+    # sin fecha y se perdia el arranque del periodo. La cuenta se deja vacia: el
+    # mayor de la pantalla trae todas las cuentas, asi que poner "la primera"
+    # seria una cuenta cualquiera y no la del banco que se concilia.
     fila = FILA_SALDO_INICIAL_MAYOR
     _escribir_fila(
         hoja, fila,
-        [None, "Saldo Inicial", None, None, None, solicitud.saldo_inicial_mayor, None, None, None],
+        [
+            _fecha_saldo_inicial(solicitud),
+            "Saldo Inicial",
+            None, None, None, solicitud.saldo_inicial_mayor, None, None, None,
+        ],
         formato_importe_idx={5},  # col F (idx 5 base 0)
         fuente=FUENTE_SALDO_INICIAL,
     )
@@ -306,14 +339,14 @@ def _armar_libro_mayor(hoja: Worksheet, solicitud: SolicitudExportacion, pendien
             hoja, fila,
             [
                 _fecha(mov.fecha),
-                mov.comprobante or "",           # B: Documento
-                mov.documento or "",             # C: Documento (referencia)
-                debe if debe else None,          # D: Debe
-                haber if haber else None,        # E: Haber
-                None,                            # F: Saldo -> formula
-                mov.descripcion or mov.concepto or "",  # G: Descripción
-                mov.organizacion or "",          # H: Organización
-                mov.cuenta or "",                # I: Centro de Costos
+                mov.documento or mov.comprobante or "",  # B: Documento
+                mov.cuenta or "",                        # C: Cuenta
+                debe if debe else None,                  # D: Debe
+                haber if haber else None,                # E: Haber
+                None,                                    # F: Saldo -> formula
+                mov.descripcion or mov.concepto or "",   # G: Descripción
+                mov.organizacion or "",                  # H: Organización
+                "",                                      # I: Centro de Costos
             ],
             formato_importe_idx={3, 4},  # D, E
         )
@@ -321,17 +354,19 @@ def _armar_libro_mayor(hoja: Worksheet, solicitud: SolicitudExportacion, pendien
         celda_saldo.number_format = FORMATO_IMPORTE
         celda_saldo.alignment = ALINEACION_DERECHA
 
-        # Resaltar: amarillo si esta conciliado (NO en pendientes_xubio), sin color si pendiente
+        # Resaltar: amarillo si tiene coincidencia (conciliado), verde si no la
+        # tiene (partida pendiente del mayor). Solo se pintan las celdas con importe.
         clave = _clave_mayor(mov.fecha, mov.concepto, mov.comprobante, mov.debe, mov.haber)
         es_pendiente = pendientes_xubio.get(clave, 0) > 0
+        relleno = RELLENO_CONCILIADO
         if es_pendiente:
             pendientes_xubio[clave] -= 1
-        elif debe or haber:
-            # Amarillo en las celdas con valor (D, E)
+            relleno = RELLENO_NO_CONCILIADO
+        if debe or haber:
             for col_idx in (4, 5):  # D, E
                 c = hoja.cell(row=fila, column=col_idx)
                 if c.value not in (None, 0):
-                    c.fill = RELLENO_CONCILIADO
+                    c.fill = relleno
 
         fila += 1
 
@@ -346,13 +381,22 @@ def _armar_movimientos_bancarios(
     solicitud: SolicitudExportacion,
     pendientes_banco_counter: Counter,
 ) -> None:
-    """Tabla de 5 columnas: Fecha | Concepto | Debito | Credito | Saldo (acumulado)."""
+    """Tabla de 5 columnas: Fecha | Concepto | Debito | Credito | Saldo (acumulado).
+
+    Encabezado sin relleno y con filtro de Excel (A8:E{ultima fila}). En los datos
+    se marca el criterio de la conciliacion:
+      - amarillo: el movimiento del banco tiene coincidencia (conciliado).
+      - naranja:  sin coincidencia y es gasto del banco (comision, IVA,
+                  impuesto, retencion): ajuste contable que falta asentar.
+      - verde:    sin coincidencia y no es gasto (ej. transferencia sin
+                  identificar): partida pendiente a investigar.
+    """
     # Anchos
     for col, ancho in ANCHOS_MOV.items():
         hoja.column_dimensions[col].width = ancho
 
-    # Encabezados en fila 8
-    _escribir_encabezados(hoja, FILA_ENCABEZADO_MOV, COLUMNAS_MOV)
+    # Encabezados en fila 8, sin relleno (texto oscuro para que se lea)
+    _escribir_encabezados(hoja, FILA_ENCABEZADO_MOV, COLUMNAS_MOV, con_relleno=False)
 
     # Fila Saldo Inicial (9) - solo el saldo en col E
     _escribir_fila(
@@ -374,10 +418,7 @@ def _armar_movimientos_bancarios(
         haber = _importe(mov.haber)
         # En el extracto: debito = salida (negativo en C), credito = entrada (positivo en D)
         # Saldo acumulado en E: =E(anterior)+D(este)+C(este)  [C es negativo, D positivo]
-        if fila == FILA_PRIMER_DATO_MOV:
-            formula_saldo = f"=E{fila-1}+D{fila}+C{fila}"
-        else:
-            formula_saldo = f"=E{fila-1}+D{fila}+C{fila}"
+        formula_saldo = f"=E{fila-1}+D{fila}+C{fila}"
 
         _escribir_fila(
             hoja, fila,
@@ -394,23 +435,31 @@ def _armar_movimientos_bancarios(
         celda_saldo.number_format = FORMATO_IMPORTE
         celda_saldo.alignment = ALINEACION_DERECHA
 
-        # Resaltar: verde si es gasto bancario pendiente, amarillo si conciliado
+        # Resaltar según el criterio de la conciliación:
+        #   amarillo (RELLENO_CONCILIADO): tiene coincidencia (conciliado)
+        #   naranja (RELLENO_AJUSTE_CONTABLE): sin coincidencia y es gasto bancario
+        #                                     (comisión, IVA, impuesto, retención) → ajuste contable
+        #   verde (RELLENO_NO_CONCILIADO): sin coincidencia y no es gasto
+        #                                     (ej. transferencia no identificada) → a investigar
         clave = _clave_banco(mov.fecha, mov.concepto, mov.debe, mov.haber)
         es_pendiente = pendientes_banco_counter.get(clave, 0) > 0
         if es_pendiente:
             pendientes_banco_counter[clave] -= 1
-            if es_gasto_bancario(mov.concepto):
-                # Verde en la celda del debito (col C)
-                c = hoja.cell(row=fila, column=3)
-                c.fill = RELLENO_PENDIENTE_BANCO
-        elif (debe or haber):
-            # Amarillo en las celdas con valor (C y/o D)
-            for col_idx in (3, 4):
+            relleno = RELLENO_AJUSTE_CONTABLE if es_gasto_bancario(mov.concepto) else RELLENO_NO_CONCILIADO
+        else:
+            relleno = RELLENO_CONCILIADO
+        if debe or haber:
+            for col_idx in (3, 4):  # C, D
                 c = hoja.cell(row=fila, column=col_idx)
                 if c.value is not None:
-                    c.fill = RELLENO_CONCILIADO
+                    c.fill = relleno
 
         fila += 1
+
+    # Filtro de Excel sobre la tabla (A8:E{ultima fila}). Arranca en el
+    # encabezado para que los desplegables queden ahi, como el modelo.
+    ultima = max(fila - 1, FILA_SALDO_INICIAL_MOV)
+    hoja.auto_filter.ref = f"A{FILA_ENCABEZADO_MOV}:E{ultima}"
 
 
 def _armar_cuadro_subcategorias(
@@ -451,8 +500,7 @@ def _armar_cuadro_subcategorias(
     encabezados = ["Concepto", "Suma Crédito", "Suma Débito"]
     for i, titulo in enumerate(encabezados):
         celda = hoja.cell(row=fila_enc, column=9 + i, value=titulo)  # cols I, J, K
-        celda.font = FUENTE_ENCABEZADO
-        celda.fill = RELLENO_ENCABEZADO
+        celda.font = FUENTE_ENCABEZADO_OSCURO  # sin relleno: texto oscuro
         celda.alignment = ALINEACION_CENTRO
         celda.border = BORDE_CUADRO
 
@@ -546,7 +594,7 @@ def exportar(solicitud: SolicitudExportacion) -> bytes:
         _escribir_membrete(mayor, solicitud.encabezado)
         _restaurar_formulas_membrete(movimientos)
 
-        # Multisets para saber que lineas son pendientes (y resaltarlas)
+        # Multisets para saber que lineas no tienen coincidencia (van en verde)
         pendientes_xubio = Counter(
             _clave_mayor(p.fecha, p.concepto, p.comprobante, p.debe, p.haber)
             for p in solicitud.pendientes_xubio
@@ -556,10 +604,7 @@ def exportar(solicitud: SolicitudExportacion) -> bytes:
             for p in solicitud.pendientes_banco
         )
 
-        # Resaltar movimientos conciliados en amarillo (en ambas hojas)
-        # La logica esta dentro de _armar_libro_mayor y _armar_movimientos_bancarios
-        # usando los contadores arriba.
-
+        # Criterio de color: coincidencia = amarillo, sin coincidencia = verde.
         _armar_libro_mayor(mayor, solicitud, pendientes_xubio)
         _armar_movimientos_bancarios(movimientos, solicitud, pendientes_banco)
         _armar_cuadro_subcategorias(movimientos, FILA_ENCABEZADO_MOV, solicitud.pendientes_banco)

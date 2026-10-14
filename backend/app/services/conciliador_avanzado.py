@@ -409,20 +409,26 @@ def _cuadro_control(
 
 
 def _tabla_dinamica_gastos(ajustes: list[dict]) -> list[dict]:
-    """Tabla dinámica: suma de débitos (absolutos) por concepto bancario."""
-    from app.services.clasificacion import _subcategoria_gasto
+    """Tabla dinámica: suma de débitos (absolutos) por concepto bancario real.
 
+    Agrupa por el concepto original del movimiento (normalizado), no por categorías
+    hardcodeadas. Así el cuadro refleja exactamente lo que dice el extracto:
+    "COM MANT CT", "IVA", "IMP S/DEB CT", "ING BRUTOS PERCEP", etc.
+    """
     sumas: dict[str, Decimal] = defaultdict(Decimal)
     conteos: dict[str, int] = defaultdict(int)
 
     for a in ajustes:
         if a["importe"] >= 0:
             continue  # solo egresos (importe negativo en convención banco)
-        concepto = a.get("concepto", "")
-        sub = _subcategoria_gasto(concepto) or "Otros"
+        concepto_original = (a.get("concepto", "") or "").strip()
+        # Normalizar: quitar espacios múltiples, mayúsculas
+        concepto_norm = " ".join(concepto_original.upper().split())
+        if not concepto_norm:
+            concepto_norm = "SIN CONCEPTO"
         monto = abs(Decimal(str(a["importe"])))
-        sumas[sub] += monto
-        conteos[sub] += 1
+        sumas[concepto_norm] += monto
+        conteos[concepto_norm] += 1
 
     # Ordenar por monto descendente
     items = sorted(sumas.items(), key=lambda x: x[1], reverse=True)
@@ -430,12 +436,12 @@ def _tabla_dinamica_gastos(ajustes: list[dict]) -> list[dict]:
     total = sum(sumas.values())
     acum = Decimal("0")
     resultado = []
-    for sub, monto in items:
+    for concepto, monto in items:
         acum += monto
         resultado.append({
-            "concepto": sub,
+            "concepto": concepto,
             "suma": float(monto.quantize(CENTAVO)),
-            "cantidad": conteos[sub],
+            "cantidad": conteos[concepto],
             "porcentaje": float((monto / total * 100).quantize(CENTAVO)) if total else 0,
             "porcentaje_acumulado": float((acum / total * 100).quantize(CENTAVO)) if total else 0,
         })

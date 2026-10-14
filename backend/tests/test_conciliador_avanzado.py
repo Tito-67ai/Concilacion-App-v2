@@ -196,7 +196,8 @@ class TestCuadroControl:
 class TestTablaDinamicaGastos:
     """Tests de la tabla dinámica de gastos bancarios."""
 
-    def test_tabla_dinamica_agrupa_por_subcategoria(self):
+    def test_tabla_dinamica_agrupa_por_concepto_original(self):
+        """Agrupa por el concepto original normalizado (mayúsculas, sin espacios extra)."""
         ajustes = [
             {"origen": "ajuste_contable", "concepto": "COMISION", "importe": -150},
             {"origen": "ajuste_contable", "concepto": "IVA", "importe": -200},
@@ -205,11 +206,11 @@ class TestTablaDinamicaGastos:
         ]
         tabla = _tabla_dinamica_gastos(ajustes)
 
-        # Debe agrupar COMISION (150+50=200), IVA (200), ING BRUTOS (250)
+        # Debe agrupar por concepto original normalizado
         conceptos = {row["concepto"]: row["suma"] for row in tabla}
-        assert conceptos["Comisiones"] == 200.0  # 150 + 50
+        assert conceptos["COMISION"] == 200.0  # 150 + 50
         assert conceptos["IVA"] == 200.0
-        assert conceptos["Ingresos Brutos"] == 250.0
+        assert conceptos["ING BRUTOS PERCEP"] == 250.0
         assert abs(sum(row["suma"] for row in tabla) - 650.0) < 0.01
 
     def test_tabla_dinamica_orden_descendente(self):
@@ -218,7 +219,7 @@ class TestTablaDinamicaGastos:
             {"origen": "ajuste_contable", "concepto": "COMISION", "importe": -500},
         ]
         tabla = _tabla_dinamica_gastos(ajustes)
-        assert tabla[0]["concepto"] == "Comisiones"
+        assert tabla[0]["concepto"] == "COMISION"
         assert tabla[1]["concepto"] == "IVA"
 
 

@@ -333,6 +333,57 @@ def test_la_ruta_mayor_devuelve_las_filas(tmp_path, client):
     assert r.json()["datos"][0]["debe"] == 15000.0
 
 
+def test_la_ruta_mayor_conserva_documento_cuenta_y_organizacion(tmp_path, client):
+    """El response_model no puede borrar los campos del Libro Mayor.
+
+    MovimientoMayor no declaraba documento/cuenta/organizacion/descripcion y
+    FastAPI los descartaba de la respuesta: el archivo cargado con el boton
+    "Libro Mayor" llegaba a la pantalla sin Documento ni Cuenta y el FO 02-03
+    salia con las columnas B y C vacias.
+    """
+    ruta = _xlsx(
+        tmp_path / "mayor_contable.xlsx",
+        ["Fecha", "Documento", "Cuenta", "Organización", "Descripción", "Debe", "Haber"],
+        [
+            [
+                "01/07/2026",
+                "Movimiento de Fondos N 952",
+                "1.1.1.2.01 I.C.B.C. Bank",
+                "FUSION MKT S.R.L.",
+                "RESCATE FCI.",
+                32000000,
+                None,
+            ]
+        ],
+    )
+
+    fila = _subir_mayor(client, ruta).json()["datos"][0]
+
+    assert fila["documento"] == "Movimiento de Fondos N 952"
+    assert fila["cuenta"] == "1.1.1.2.01 I.C.B.C. Bank"
+    assert fila["organizacion"] == "FUSION MKT S.R.L."
+    # "Descripción" cae en la columna del detalle (concepto): el papel de trabajo
+    # escribe descripcion o concepto, asi que el texto no se pierde.
+    assert fila["concepto"] == "RESCATE FCI."
+
+
+def test_el_encabezado_organizacion_con_tilde_se_reconoce(tmp_path):
+    """El export del contable nombra la columna "Organización", con tilde.
+
+    El traductor compara sin acentos, pero ORGANIZACION no estaba entre los
+    alias, asi que la columna H del papel de trabajo salia siempre vacia.
+    """
+    ruta = _xlsx(
+        tmp_path / "mayor_org.xlsx",
+        ["Fecha", "Detalle", "Organización", "Debe", "Haber"],
+        [["01/07/2026", "Pago a proveedor", "FUSION MKT S.R.L.", None, 1000]],
+    )
+
+    mov = leer_mayor(str(ruta)).datos[0]
+
+    assert mov["organizacion"] == "FUSION MKT S.R.L."
+
+
 def test_la_ruta_mayor_reporta_la_convencion_de_cuenta(tmp_path, client):
     """El archivo real de Xubio es 'Movimientos de CC', no un Libro Mayor: la
     pantalla tiene que enterarse para poder mostrarlo y no confundir una
@@ -516,3 +567,111 @@ def test_un_json_sin_columnas_conocidas_dice_que_columnas_habia():
 def test_un_json_sin_filas_lo_dice():
     with pytest.raises(ErrorDeExtraccion):
         leer_mayor_desde_json({"data": []})
+
+
+# --------------------------------------------------------------------------
+# El webreport real: XML con los 43 campos de la grilla
+# --------------------------------------------------------------------------
+#
+# El XML tiene <fields> (metadatos) y <data> (CSV con ; de fila y , de campo).
+# Los campos que el Libro Mayor del papel de trabajo necesita (Documento,
+# Cuenta, Organizacion, Descripcion) salen de DOCUMENTO/CUENTA/ORGANIZACION/
+# DESCRIPCION, no de las columnas de importe.
+
+CAMPOS_WEBREPORT = [
+    "FECHA", "ORDERID", "DOCUMENTO", "CUENTA", "MONEDA", "DEBEMONPRINCIPAL",
+    "HABERMONPRINCIPAL", "SALDOMONPRINCIPAL", "DESCRIPCION", "ORGANIZACION",
+    "ASIENTOITEMID", "TRANSACCIONID", "ORGANIZACIONID", "CENTRODECOSTOID",
+    "CENTRODECOSTO", "CUIT", "CUENTAID", "CUENTACODIGO", "COMPROBANTE",
+    "MONEDAID", "DEBEMONSECUNDARIA", "HABERMONSECUNDARIA", "SALDOMONSECUNDARIA",
+    "DEBEMONTRANSACCION", "HABERMONTRANSACCION", "SALDOMONTRANSACCION",
+    "DEBE", "HABER", "SALDO", "@@CLASEVO", "@@FORMXML", "ANO", "ANOMES",
+    "EMPRESA", "DETALLE", "IMPORTEOPERACIONPPAL", "IMPORTEOPERACIONSEC",
+    "IMPORTEOPERACIONTRANS", "CUENTARAMA1", "CUENTARAMA2", "CUENTARAMA3",
+    "CUENTARAMAN", "USRCODE",
+]
+
+
+def _fila_webreport(**valores) -> list[str]:
+    """Una fila del CSV del webreport con solo los campos que el test usa."""
+    fila = {campo: "" for campo in CAMPOS_WEBREPORT}
+    fila.update(valores)
+    return [fila[campo] for campo in CAMPOS_WEBREPORT]
+
+
+def _xml_webreport(filas) -> str:
+    fields = "".join(f'<field name="{n}" />' for n in CAMPOS_WEBREPORT)
+    data = "".join("PK," + ",".join(f) + ";" for f in filas)
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        "<root><dataset><firstfieldPK>1</firstfieldPK>"
+        f"<fields>{fields}</fields><data>{data}</data>"
+        "</dataset></root>"
+    )
+
+
+def test_webreport_extrae_documento_cuenta_y_organizacion():
+    xml = _xml_webreport([
+        _fila_webreport(
+            FECHA="2026-07-01",
+            DOCUMENTO="Movimiento de Fondos N 952",
+            CUENTA="1.1.1.2.01 I.C.B.C. Bank",
+            DESCRIPCION="RESCATE FCI.",
+            ORGANIZACION="FUSION MKT S.R.L.",
+            DEBEMONPRINCIPAL="32000000",
+            DEBE="32000000",
+            CUENTACODIGO="1.1.1.2.01",
+            COMPROBANTE="X-0001-00004519",
+        )
+    ])
+
+    mov = leer_mayor_desde_json(xml).datos[0]
+
+    assert mov["documento"] == "Movimiento de Fondos N 952"
+    assert mov["cuenta"] == "1.1.1.2.01 I.C.B.C. Bank"
+    assert mov["organizacion"] == "FUSION MKT S.R.L."
+    assert mov["descripcion"] == "RESCATE FCI."
+    assert mov["debe"] == 32000000.0
+
+
+def test_webreport_cuenta_cae_al_codigo_cuando_no_hay_display():
+    """Si el webreport no llena CUENTA, el codigo contable es mejor que nada."""
+    xml = _xml_webreport([
+        _fila_webreport(
+            FECHA="2026-07-02",
+            DEBEMONPRINCIPAL="1",
+            DEBE="1",
+            CUENTACODIGO="1.1.1.2.01",
+        )
+    ])
+
+    assert leer_mayor_desde_json(xml).datos[0]["cuenta"] == "1.1.1.2.01"
+
+
+def test_las_celdas_vacias_no_se_escriben_como_nan():
+    """pandas deja NaN en las celdas vacias y str(NaN) == 'nan': sin filtrarlo,
+    la Descripcion del Libro Mayor salia con la cadena 'nan'."""
+    import numpy as np
+
+    from app.services.importador_mayor import _desde_dataframe
+
+    df = pd.DataFrame([
+        {
+            "FECHA": "2026-07-02",
+            "DEBE": 500,
+            "HABER": 0,
+            "DETALLE": np.nan,
+            "DOCUMENTO": np.nan,
+            "CUENTA": np.nan,
+            "ORGANIZACION": np.nan,
+            "DESCRIPCION": np.nan,
+        }
+    ])
+
+    mov = _desde_dataframe(df).datos[0]
+
+    assert mov["concepto"] == ""
+    assert mov["descripcion"] is None
+    assert mov["documento"] is None
+    assert mov["cuenta"] is None
+    assert mov["organizacion"] is None

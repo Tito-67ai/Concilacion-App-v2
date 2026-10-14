@@ -18,8 +18,10 @@ import {
   MovimientoBanco,
   MovimientoMayor,
   ParConciliado,
+  PartidaPendiente,
   RespuestaAfiliados,
   RespuestaBancos,
+  RespuestaConciliacionAvanzada,
   RespuestaCruce,
   RespuestaCruceAfiliados,
   RespuestaExtraccion,
@@ -111,7 +113,14 @@ export class ConciliacionComponent implements OnInit {
 
   private _movimientosBanco: MovimientoBanco[] = [];
   get movimientosBanco(): MovimientoBanco[] { return this._movimientosBanco; }
-  set movimientosBanco(valor: MovimientoBanco[]) { this._movimientosBanco = valor; this.notificar(); }
+  set movimientosBanco(valor: MovimientoBanco[]) {
+    this._movimientosBanco = valor;
+    // Un extracto nuevo invalida el analisis avanzado, que es de las filas
+    // anteriores. Se borra en el origen (y no solo al reconcialiar) para que no
+    // quede un cuadro de control viejo colgado de datos que ya no estan.
+    this._analisisAvanzado = null;
+    this.notificar();
+  }
 
   private _archivoSeleccionado: File | null = null;
   get archivoSeleccionado(): File | null { return this._archivoSeleccionado; }
@@ -190,6 +199,23 @@ export class ConciliacionComponent implements OnInit {
   private _pendientesXubio: MovimientoMayor[] = [];
   get pendientesXubio(): MovimientoMayor[] { return this._pendientesXubio; }
   set pendientesXubio(valor: MovimientoMayor[]) { this._pendientesXubio = valor; this.notificar(); }
+
+  // ------------------------------------------------------------------
+  // Conciliacion avanzada FO 02-03 (POST /conciliacion/cruzar-avanzado)
+  //
+  // El cruce de arriba devuelve las bandejas para emparejar. Este analisis
+  // clasifica lo que quedo sin par (ajustes contables y partidas pendientes) y
+  // arma el cuadro de control que explica la diferencia banco/empresa. Se pide
+  // a mano con su propio boton: es una segunda ida y vuelta al backend y no
+  // tiene por que frenar el "Autoconciliar".
+  // ------------------------------------------------------------------
+  private _analisisAvanzado: RespuestaConciliacionAvanzada | null = null;
+  get analisisAvanzado(): RespuestaConciliacionAvanzada | null { return this._analisisAvanzado; }
+  set analisisAvanzado(valor: RespuestaConciliacionAvanzada | null) { this._analisisAvanzado = valor; this.notificar(); }
+
+  private _analizandoAvanzado: boolean = false;
+  get analizandoAvanzado(): boolean { return this._analizandoAvanzado; }
+  set analizandoAvanzado(valor: boolean) { this._analizandoAvanzado = valor; this.notificar(); }
 
   // ------------------------------------------------------------------
   // Afiliados de Xubio (web) en el inicio del panel derecho
@@ -296,7 +322,13 @@ export class ConciliacionComponent implements OnInit {
   // ------------------------------------------------------------------
   private _movimientosMayor: MovimientoMayor[] = [];
   get movimientosMayor(): MovimientoMayor[] { return this._movimientosMayor; }
-  set movimientosMayor(valor: MovimientoMayor[]) { this._movimientosMayor = valor; this.notificar(); }
+  set movimientosMayor(valor: MovimientoMayor[]) {
+    this._movimientosMayor = valor;
+    // Mismo criterio que con el extracto: el analisis avanzado es de las filas
+    // anteriores y no sobrevive a un mayor nuevo.
+    this._analisisAvanzado = null;
+    this.notificar();
+  }
   // El nombre del archivo (o del reporte) cargado, para que se vea cual quedo
   // si cambia.
   private _nombreMayor: string = '';
@@ -1271,7 +1303,8 @@ export class ConciliacionComponent implements OnInit {
                 : '';
             this.infoMensaje =
               `Libro Mayor cargado: ${this.movimientosMayor.length} movimientos ` +
-              `de ${archivo.name}.${convencion} Ya se puede pedir Autoconciliar.`;
+              `de ${archivo.name}.${convencion} Ya se puede pedir Autoconciliar.` +
+              this.avisoDocumentoCuenta(this.movimientosMayor);
           },
           error: (error: HttpErrorResponse) => {
             console.error('Error leyendo el Libro Mayor', error);
@@ -1370,7 +1403,8 @@ export class ConciliacionComponent implements OnInit {
               : '';
           this.infoMensaje =
             `Libro Mayor de Xubio: ${movimientos.length} movimientos ` +
-            `(${rango.desde} a ${rango.hasta}).${convencion} Ya se puede pedir Autoconciliar.`;
+            `(${rango.desde} a ${rango.hasta}).${convencion} Ya se puede pedir Autoconciliar.` +
+            this.avisoDocumentoCuenta(movimientos);
         },
         error: (error: HttpErrorResponse) => {
           console.error('Error trayendo el Libro Mayor de Xubio', error);
@@ -1402,6 +1436,31 @@ export class ConciliacionComponent implements OnInit {
     const fecha = new Date(Date.UTC(anio, mes - 1, dia));
     fecha.setUTCDate(fecha.getUTCDate() + dias);
     return fecha.toISOString().slice(0, 10);
+  }
+
+  /**
+   * Avisa cuando el Libro Mayor cargado no trae Documento ni Cuenta.
+   *
+   * El FO 02-03 copia esos campos tal cual a las columnas B y C de la hoja
+   * "Libro Mayor": si el archivo del contable no los trae (los "Movimientos de
+   * CC" del banco, por ejemplo), el Excel sale con las dos columnas vacías y
+   * parece un error del export. Mejor decirlo al cargar que al exportar.
+   */
+  private avisoDocumentoCuenta(movimientos: MovimientoMayor[]): string {
+    const conDocumento = movimientos.filter(
+      (m) => (m.documento ?? '').trim() !== ''
+    ).length;
+    const conCuenta = movimientos.filter((m) => (m.cuenta ?? '').trim() !== '').length;
+    if (conDocumento > 0 && conCuenta > 0) return '';
+
+    const faltantes: string[] = [];
+    if (conDocumento === 0) faltantes.push('Documento');
+    if (conCuenta === 0) faltantes.push('Cuenta');
+    return (
+      ` Atención: este Libro Mayor no trae ${faltantes.join(' ni ')}. ` +
+      'La hoja "Libro Mayor" del FO 02-03 va a salir con esas columnas vacías. ' +
+      'Para completarlas, traelo con "Traer de Xubio".'
+    );
   }
 
   /** Si el botón "Traer de Xubio" se puede usar ahora mismo. */
@@ -1614,6 +1673,9 @@ export class ConciliacionComponent implements OnInit {
     this.cargando = true;
     this.errorMensaje = '';
     this.infoMensaje = '';
+    // Un cruce nuevo deja el analisis avanzado viejo: sus totales son de las
+    // bandejas anteriores y mostrarlos mezclados confunde.
+    this.analisisAvanzado = null;
 
     // Los dos lados van en el cuerpo: el mayor viene del archivo que cargo el
     // usuario, no de la API de Xubio, que esta reservada a planes superiores.
@@ -1672,5 +1734,86 @@ export class ConciliacionComponent implements OnInit {
         );
       }
     });
+  }
+
+  // ------------------------------------------------------------------
+  // Conciliacion avanzada FO 02-03
+  // ------------------------------------------------------------------
+
+  /**
+   * El analisis necesita los mismos dos lados que el Autoconciliar: sin banco
+   * y mayor no hay nada que clasificar. Se apaga mientras corre para no pedir
+   * dos veces lo mismo.
+   */
+  get puedeAnalizarAvanzado(): boolean {
+    return this.puedeAutoconciliar && !this.analizandoAvanzado;
+  }
+
+  /** Es exactamente el mismo requisito que el Autoconciliar, con otro boton. */
+  get motivoAnalizarBloqueado(): string {
+    return this.motivoAutoconciliarBloqueado;
+  }
+
+  /** Las pendientes del Libro Mayor (en transito). El backend las manda mezcladas. */
+  get partidasPendientesMayor(): PartidaPendiente[] {
+    return (
+      this.analisisAvanzado?.partidas_pendientes.filter(
+        (p) => p.origen === 'pendiente_mayor'
+      ) ?? []
+    );
+  }
+
+  /** Las pendientes del extracto (a investigar). */
+  get partidasPendientesBanco(): PartidaPendiente[] {
+    return (
+      this.analisisAvanzado?.partidas_pendientes.filter(
+        (p) => p.origen === 'pendiente_banco'
+      ) ?? []
+    );
+  }
+
+  /**
+   * Clasifica lo que quedo sin par y arma el cuadro de control FO 02-03.
+   *
+   * POST /conciliacion/cruzar-avanzado: mismos dos lados que el cruce comun,
+   * pero ademas separa los "sin coincidencia" en ajustes contables (gastos del
+   * banco sin registrar) y partidas pendientes (en transito / a investigar), y
+   * arma los totales que explican la diferencia banco/empresa.
+   */
+  ejecutarConciliacionAvanzada() {
+    if (this.analizandoAvanzado) return;
+
+    if (!this.puedeAnalizarAvanzado) {
+      this.errorMensaje = this.motivoAnalizarBloqueado;
+      return;
+    }
+
+    this.analizandoAvanzado = true;
+    this.errorMensaje = '';
+    this.infoMensaje = '';
+
+    this.http
+      .post<RespuestaConciliacionAvanzada>(
+        `${API}/conciliacion/cruzar-avanzado`,
+        {
+          movimientos_banco: this.movimientosBanco,
+          movimientos_mayor: this.movimientosMayor,
+        }
+      )
+      .subscribe({
+        next: (respuesta) => {
+          this.analisisAvanzado = respuesta;
+          this.analizandoAvanzado = false;
+        },
+        error: (error: HttpErrorResponse) => {
+          this.analisisAvanzado = null;
+          this.analizandoAvanzado = false;
+          this.errorMensaje = this.mensajeDeError(
+            error,
+            'No se pudo hacer el análisis avanzado. Revisá que FastAPI esté ' +
+            'corriendo en el puerto 8000.'
+          );
+        },
+      });
   }
 }

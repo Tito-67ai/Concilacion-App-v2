@@ -9,10 +9,11 @@ Hoja "Movimientos Bancarios":
     Fila 8: encabezados (Fecha contable, Concepto, Debito en $, Credito en $, Saldo en $)
     Fila 9: "Saldo Inicial" con saldo en E
     Fila 10+: todos los movimientos del extracto (sin repetidos), debito=negativo, credito=positivo, saldo acumulado
+    Encabezado sin relleno y con filtro de Excel (A8:E...).
 
-Colores:
-    Amarillo (FFFFFF00) = importe conciliado
-    Verde (93C47D) = gasto bancario pendiente (debito automatico)
+Colores (ambas hojas):
+    Amarillo (FFFFFF00) = el movimiento tiene coincidencia (conciliado)
+    Verde (FF93C47D)    = sin coincidencia (partida pendiente)
 """
 
 import io
@@ -91,7 +92,10 @@ def test_libro_mayor_tiene_encabezados_correctos():
         celda = hoja.cell(row=9, column=i)
         assert celda.font.bold
         assert celda.fill.fgColor.rgb == "00000000"  # sin relleno azul
-        assert celda.font.color.rgb == "00FFFFFF"  # fuente blanca
+        # Sin relleno, la fuente no puede ser blanca: el titulo quedaria
+        # invisible sobre el fondo blanco (incluida la "Fecha").
+        color = celda.font.color.rgb if celda.font.color else None
+        assert color not in ("00FFFFFF", "FFFFFFFF")
 
 
 def test_libro_mayor_saldo_inicial_en_fila_10():
@@ -123,6 +127,53 @@ def test_libro_mayor_lista_todos_los_movimientos_ordenados():
     assert hoja["E13"].value in (None, 0)  # haber=0 se escribe como vacio
 
 
+def test_libro_mayor_escribe_documento_cuenta_y_organizacion():
+    """El modelo de auditoria: B=Documento, C=Cuenta, H=Organizacion."""
+    sol = _solicitud(
+        movimientos_mayor=[
+            {
+                "fecha": "2026-07-02",
+                "documento": "Movimiento de Fondos N 952",
+                "cuenta": "1.1.1.2.01 I.C.B.C. Bank",
+                "organizacion": "FUSION MKT S.R.L.",
+                "descripcion": "RESCATE FCI.",
+                "concepto": "detalle interno",
+                "debe": 32000000,
+                "haber": 0,
+            }
+        ],
+        pendientes_xubio=[],
+    )
+    hoja = _mayor(exportador.exportar(sol))
+    assert hoja["B11"].value == "Movimiento de Fondos N 952"   # Documento
+    assert hoja["C11"].value == "1.1.1.2.01 I.C.B.C. Bank"     # Cuenta
+    assert hoja["G11"].value == "RESCATE FCI."                 # Descripción
+    assert hoja["H11"].value == "FUSION MKT S.R.L."            # Organización
+
+
+def test_libro_mayor_saldo_inicial_lleva_la_fecha_de_apertura():
+    """El Saldo Inicial va con la fecha de apertura (un dia antes del primero).
+
+    La cuenta queda vacia a proposito: el mayor trae todas las cuentas y poner
+    "la primera" seria una cuenta cualquiera.
+    """
+    sol = _solicitud(
+        movimientos_mayor=[
+            {
+                "fecha": "2026-07-01",
+                "cuenta": "1.1.1.2.01 I.C.B.C. Bank",
+                "debe": 10,
+                "haber": 0,
+            }
+        ],
+        pendientes_xubio=[],
+    )
+    hoja = _mayor(exportador.exportar(sol))
+    assert hoja["A10"].value.date() == date(2026, 6, 30)  # un dia antes del 1er movimiento
+    assert hoja["B10"].value == "Saldo Inicial"
+    assert hoja["C10"].value in (None, "")
+
+
 def test_libro_mayor_saldo_por_formula():
     hoja = _mayor(exportador.exportar(_solicitud()))
     # F11 = F10 + D11 - E11
@@ -139,19 +190,19 @@ def test_libro_mayor_saldo_por_formula():
         assert celda.alignment.horizontal == "right"
 
 
-def test_libro_mayor_conciliados_en_amarillo_pendientes_sin_color():
+def test_libro_mayor_conciliados_en_amarillo_pendientes_en_verde():
     hoja = _mayor(exportador.exportar(_solicitud()))
-    # FCA-1 y FCA-2 estan conciliados -> amarillo en D/E
+    # FCA-1 y FCA-2 tienen coincidencia -> amarillo en D/E
     for fila in (11, 12):
         for col in (4, 5):  # D, E
             c = hoja.cell(row=fila, column=col)
             if c.value not in (None, 0):
                 assert c.fill.fgColor.rgb == "FFFFFF00", f"Fila {fila} col {col} deberia ser amarillo"
-    # FCA-3 esta en pendientes_xubio -> sin color
+    # FCA-3 esta en pendientes_xubio -> sin coincidencia -> verde
     for col in (4, 5):
         c = hoja.cell(row=13, column=col)
         if c.value not in (None, 0):
-            assert c.fill.fgColor.rgb != "FFFFFF00" or c.fill.fgColor.rgb == "00000000", f"Fila 13 col {col} no deberia ser amarillo"
+            assert c.fill.fgColor.rgb == "FF93C47D", f"Fila 13 col {col} deberia ser verde"
 
 
 # ----------------------------------------------------------------------
@@ -166,7 +217,8 @@ def test_movimientos_bancarios_tiene_encabezados_correctos():
         assert hoja.cell(row=8, column=i).value == nombre
         c = hoja.cell(row=8, column=i)
         assert c.font.bold
-        assert c.fill.fgColor.rgb == "FF00B0F0"
+        # Sin relleno azul (ni ninguno): solo el dato.
+        assert c.fill.fgColor.rgb in ("00000000", None) or c.fill.fill_type is None
 
 
 def test_movimientos_bancarios_saldo_inicial_en_fila_9():
@@ -215,27 +267,29 @@ def test_movimientos_bancarios_saldo_acumulado_por_formula():
         assert "#,##0.00" in fmt and "-" in fmt and "@" in fmt
 
 
-def test_movimientos_bancarios_gasto_pendiente_en_verde():
+def test_movimientos_bancarios_encabezados_sin_relleno():
     hoja = _movimientos(exportador.exportar(_solicitud()))
-    # COMISION (fila 11) y IVA (fila 12) son gastos bancarios y estan en pendientes_banco -> verde en C
-    c11 = hoja.cell(row=11, column=3)
-    c12 = hoja.cell(row=12, column=3)
-    assert c11.fill.fgColor.rgb == "FF93C47D"
-    assert c12.fill.fgColor.rgb == "FF93C47D"
-    # PAGO PROVEEDOR (fila 13) NO es gasto bancario -> no verde
-    c13 = hoja.cell(row=13, column=3)
-    assert c13.fill.fgColor.rgb != "FF93C47D"
+    # Encabezado de la tabla (A-E) y del cuadro (I-K): sin relleno.
+    for col in list(range(1, 6)) + list(range(9, 12)):
+        c = hoja.cell(row=8, column=col)
+        assert not c.fill.fill_type, f"{c.coordinate} no deberia tener relleno"
 
 
-def test_movimientos_bancarios_conciliados_en_amarillo():
+def test_movimientos_bancarios_tres_colores_segun_criterio():
     hoja = _movimientos(exportador.exportar(_solicitud()))
-    # COBRO (fila 10) esta conciliado -> amarillo en D (tiene credito)
-    d10 = hoja.cell(row=10, column=4)
-    assert d10.fill.fgColor.rgb == "FFFFFF00"
-    # COMISION e IVA son pendientes -> no amarillo (son verdes)
-    # PAGO PROVEEDOR no es pendiente -> amarillo en C
-    c13 = hoja.cell(row=13, column=3)
-    assert c13.fill.fgColor.rgb == "FFFFFF00"
+    # COBRO (fila 10) y PAGO PROVEEDOR (fila 13) tienen coincidencia -> amarillo
+    assert hoja["D10"].fill.fgColor.rgb == "FFFFFF00"
+    assert hoja["C13"].fill.fgColor.rgb == "FFFFFF00"
+    # COMISION (fila 11) e IVA (fila 12) son pendientes del banco Y son gastos
+    # bancarios -> naranja (ajuste contable que falta registrar en Xubio)
+    assert hoja["C11"].fill.fgColor.rgb == "FFE69138"
+    assert hoja["C12"].fill.fgColor.rgb == "FFE69138"
+
+
+def test_movimientos_bancarios_tiene_filtro():
+    hoja = _movimientos(exportador.exportar(_solicitud()))
+    # Filtro de Excel sobre la tabla, arrancando en el encabezado (fila 8).
+    assert hoja.auto_filter.ref == "A8:E13"
 
 
 def test_movimientos_bancarios_no_duplica_lineas_repetidas():
@@ -279,19 +333,22 @@ def test_importes_formato_contable_dos_decimales():
 
 def test_encabezados_resaltados_azul():
     hoja = _mayor(exportador.exportar(_solicitud()))
-    # Libro Mayor: headers SIN relleno azul (transparente)
+    # Libro Mayor: headers SIN relleno azul (transparente) pero con texto visible
     for col in range(1, 10):
         c = hoja.cell(row=9, column=col)
         assert c.fill.fgColor.rgb == "00000000"  # sin relleno
         assert c.font.bold
-        assert c.font.color.rgb == "00FFFFFF"  # fuente blanca (con alpha)
+        color = c.font.color.rgb if c.font.color else None
+        assert color not in ("00FFFFFF", "FFFFFFFF")  # nunca blanco sobre blanco
 
     hoja2 = _movimientos(exportador.exportar(_solicitud()))
-    # Movimientos Bancarios: headers CON relleno azul
+    # Movimientos Bancarios: headers SIN relleno (en limpio) pero con texto visible
     for col in range(1, 6):
         c = hoja2.cell(row=8, column=col)
-        assert c.fill.fgColor.rgb == "FF00B0F0"
+        assert not c.fill.fill_type
         assert c.font.bold
+        color = c.font.color.rgb if c.font.color else None
+        assert color not in ("00FFFFFF", "FFFFFFFF")  # nunca blanco sobre blanco
 
 
 def test_membrete_linkado_desde_movimientos():

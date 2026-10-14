@@ -210,3 +210,117 @@ export interface RespuestaExtraccion {
   cantidad_movimientos: number;
   datos: MovimientoBanco[];
 }
+
+// ---------------------------------------------------------------------------
+// Conciliacion avanzada FO 02-03 (POST /conciliacion/cruzar-avanzado)
+//
+// El cruce simple devuelve las tres bandejas para emparejar. Este ademas
+// clasifica lo que quedo sin par:
+//
+//   - ajustes contables: gastos que el banco cobro y la contabilidad todavia
+//     no registro (comisiones, impuestos, retenciones). Se registran y cuadran.
+//   - partidas pendientes: en transito, cuando el banco todavia no debito un
+//     pago del mayor (origen 'pendiente_mayor'), o a investigar, cuando el
+//     banco muestra un movimiento que no es gasto y no tiene par
+//     (origen 'pendiente_banco').
+//
+// Con eso arma el cuadro de control que explica la diferencia banco/empresa.
+// ---------------------------------------------------------------------------
+
+/** Los totales del cuadro de control: la conciliacion en unos pocos numeros. */
+export interface CuadroControl {
+  ingresos: {
+    empresa_total: number;
+    banco_total: number;
+    conciliados: number;
+    diferencia_neta: number;
+  };
+  egresos: {
+    empresa_total: number;
+    banco_total: number;
+    conciliados: number;
+    diferencia_neta: number;
+  };
+  ajustes_contables: { total: number; cantidad: number };
+  partidas_pendientes: {
+    banco_cantidad: number;
+    mayor_cantidad: number;
+    total_mayor: number;
+  };
+  conciliados: {
+    cantidad: number;
+    total_ingresos: number;
+    total_egresos: number;
+  };
+}
+
+/** Un gasto del banco sin asiento contable: hay que registrarlo en Xubio. */
+export interface AjusteContable {
+  origen?: string;
+  fecha: string | null;
+  concepto: string;
+  referencia?: string | null;
+  debito: number;
+  credito: number;
+  importe: number;
+  saldo: number;
+  categoria?: string | null;
+  cuit?: string | null;
+  cbu?: string | null;
+  nombre_tercero?: string | null;
+}
+
+/**
+ * Un movimiento sin par. `origen` distingue el lado: 'pendiente_mayor' es del
+ * Libro Mayor (tipico cheque emitido que el banco todavia no debito) y
+ * 'pendiente_banco' es del extracto (a investigar). Los campos del otro lado
+ * quedan vacios segun de donde venga.
+ */
+export interface PartidaPendiente {
+  origen: string;
+  fecha: string | null;
+  concepto: string;
+  referencia?: string | null;
+  comprobante?: string | null;
+  debe?: number;
+  haber?: number;
+  importe: number;
+  saldo: number;
+  categoria?: string | null;
+  documento?: string | null;
+  cuenta?: string | null;
+  organizacion?: string | null;
+  descripcion?: string | null;
+  cuit?: string | null;
+  cbu?: string | null;
+  nombre_tercero?: string | null;
+}
+
+/** Una fila de la tabla dinamica de gastos bancarios (mismo concepto sumado). */
+export interface GastoBancarioResumen {
+  concepto: string;
+  suma: number;
+  cantidad: number;
+  porcentaje: number;
+  porcentaje_acumulado: number;
+}
+
+export interface EstadisticasConciliacion {
+  total_movimientos_banco: number;
+  total_movimientos_mayor: number;
+  conciliados: number;
+  ajustes_contables: number;
+  pendientes_banco: number;
+  pendientes_mayor: number;
+  porcentaje_conciliado: number;
+}
+
+export interface RespuestaConciliacionAvanzada {
+  exito: boolean;
+  conciliados: Record<string, unknown>[];
+  ajustes_contables: AjusteContable[];
+  partidas_pendientes: PartidaPendiente[];
+  cuadro_control: CuadroControl;
+  tabla_dinamica_gastos: GastoBancarioResumen[];
+  estadisticas: EstadisticasConciliacion;
+}

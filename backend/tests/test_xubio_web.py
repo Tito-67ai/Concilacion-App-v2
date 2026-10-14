@@ -194,16 +194,22 @@ async def test_obtener_libro_mayor_respeta_la_empresa_pasada_por_parametro(monke
     assert 'name="p_EmpresaReportCode" value="12345"' in captura["cuerpo"]
 
 
-async def test_obtener_libro_mayor_sin_empresa_no_inventa_cuenta(monkeypatch):
+async def test_obtener_libro_mayor_sin_empresa_usa_la_sesion(monkeypatch):
+    """Sin empresa configurada se manda vacia y el webreport usa la de la sesion.
+
+    Antes se cortaba con error para no inventar una cuenta, pero un codigo
+    guardado de otra cuenta (el default viejo) devolvia 0 filas sin decir por
+    que: la sesion es la fuente de verdad.
+    """
     monkeypatch.setattr(config.settings, "XUBIO_WEB_TOKEN", "309-token-de-prueba")
     monkeypatch.setattr(config.settings, "XUBIO_WEB_EMPRESA_REPORT_CODE", "")
     captura: dict = {}
     cliente = XubioWebClient(transport=_transport_mayor(captura))
 
-    with pytest.raises(XubioWebNoConfigurado, match="EMPRESA_REPORT_CODE"):
-        await cliente.obtener_libro_mayor(desde="2026-07-01", hasta="2026-07-31")
-    # Sin empresa no se llamo a nadie: no hay reporte de una cuenta inventada.
-    assert captura == {}
+    await cliente.obtener_libro_mayor(desde="2026-07-01", hasta="2026-07-31")
+
+    assert captura["method"] == "POST"
+    assert 'name="p_EmpresaReportCode" value=""' in captura["cuerpo"]
 
 
 async def test_obtener_libro_mayor_sin_fechas_usa_los_ultimos_30_dias(monkeypatch):

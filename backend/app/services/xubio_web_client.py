@@ -124,18 +124,15 @@ class XubioWebClient:
         vive en el backend, igual que con los afiliados.
 
         La empresa sale de XUBIO_WEB_EMPRESA_REPORT_CODE (la detecta el bot al
-        loguearse) o del parametro, para no quedar atado a una sola cuenta.
+        loguearse) o del parametro. Si no hay ninguna configurada se manda
+        VACIA y el webreport resuelve la empresa de la sesion: un codigo
+        guardado de otra cuenta devolvia 0 filas sin decir por que, y la sesion
+        (que es la del usuario logueado) es la fuente de verdad.
         """
         desde = desde or (date.today() - timedelta(days=30)).isoformat()
         hasta = hasta or date.today().isoformat()
 
         empresa = (empresa_report_code or self._empresa_report_code).strip()
-        if not empresa:
-            raise XubioWebNoConfigurado(
-                "Falta XUBIO_WEB_EMPRESA_REPORT_CODE: no se sabe de que empresa "
-                "bajar el Libro Mayor. Inicia sesion con el bot para detectarla, "
-                "o defini la empresa en el .env."
-            )
         cuenta = self._cuenta_report_code
 
         payload_xml = f"""<?xml version="1.0" encoding="UTF-8"?>

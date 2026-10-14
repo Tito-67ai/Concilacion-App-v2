@@ -160,6 +160,18 @@
         {{ motivoAutoconciliarBloqueado }}
       </span>
 
+      <!-- Botón Análisis FO 02-03: clasifica lo que quedó sin par (gastos del
+           banco que la contabilidad no registró vs partidas en tránsito) y arma
+           el cuadro de control. Pide los mismos dos lados que Autoconciliar. -->
+      <button (click)="ejecutarConciliacionAvanzada()"
+              [disabled]="!puedeAnalizarAvanzado"
+              [title]="motivoAnalizarBloqueado || 'Clasificar lo que quedó sin coincidencia (FO 02-03)'"
+              class="flex items-center gap-1.5 rounded-lg border border-[#004e82]/30 bg-[#eaf2f8] px-3.5 py-2 text-sm text-[#004e82] shadow-sm transition-colors duration-200 hover:border-[#004e82]/60 hover:bg-[#dcebf5] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-[#004e82]/30 disabled:hover:bg-[#eaf2f8]">
+        <i *ngIf="!analizandoAvanzado" class="pi pi-chart-bar text-xs"></i>
+        <i *ngIf="analizandoAvanzado" class="pi pi-spin pi-spinner text-xs"></i>
+        {{ analizandoAvanzado ? 'Analizando…' : 'Análisis FO 02-03' }}
+      </button>
+
       <!-- Botón Importar: el menú con las dos vías vive en su propio componente.
            PDF sale a /importar-pdf; Excel se procesa acá mismo. -->
       <app-importar-menu (excelSeleccionado)="importarExcel($event)"></app-importar-menu>
@@ -527,6 +539,180 @@
         </div>
       </div>
     </div>
+
+    <!-- 5. Conciliación avanzada FO 02-03: qué hacer con lo que quedó sin par.
+         Es un análisis aparte del "Autoconciliar": clasifica los movimientos
+         sin pareja en ajustes contables (gastos del banco sin registrar) y
+         partidas pendientes (en tránsito / a investigar), y arma el cuadro de
+         control que explica la diferencia banco/empresa. -->
+    <section *ngIf="analisisAvanzado"
+             class="mt-5 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+      <div class="mb-4 flex flex-wrap items-baseline justify-between gap-2">
+        <h2 class="text-base font-medium text-gray-800">Conciliación FO 02-03</h2>
+        <span class="text-[11px] text-gray-500">Análisis de lo que quedó sin coincidencia</span>
+      </div>
+
+      <!-- Resumen en tarjetas -->
+      <div class="mb-5 grid grid-cols-2 gap-3 md:grid-cols-5">
+        <div class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+          <p class="text-[11px] text-gray-500">Conciliados</p>
+          <p class="text-lg font-semibold tabular-nums text-gray-800">
+            {{ analisisAvanzado.estadisticas.conciliados }}
+          </p>
+        </div>
+        <div class="rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2">
+          <p class="text-[11px] text-yellow-700">Ajustes contables</p>
+          <p class="text-lg font-semibold tabular-nums text-yellow-800">
+            {{ analisisAvanzado.estadisticas.ajustes_contables }}
+          </p>
+          <p class="text-[10px] text-yellow-700">registrar en Xubio</p>
+        </div>
+        <div class="rounded-lg border border-green-200 bg-green-50 px-3 py-2">
+          <p class="text-[11px] text-green-700">Pendientes del banco</p>
+          <p class="text-lg font-semibold tabular-nums text-green-800">
+            {{ analisisAvanzado.estadisticas.pendientes_banco }}
+          </p>
+          <p class="text-[10px] text-green-700">a investigar</p>
+        </div>
+        <div class="rounded-lg border border-green-200 bg-green-50 px-3 py-2">
+          <p class="text-[11px] text-green-700">Pendientes del mayor</p>
+          <p class="text-lg font-semibold tabular-nums text-green-800">
+            {{ analisisAvanzado.estadisticas.pendientes_mayor }}
+          </p>
+          <p class="text-[10px] text-green-700">en tránsito</p>
+        </div>
+        <div class="rounded-lg border border-[#004e82]/20 bg-[#eaf2f8] px-3 py-2">
+          <p class="text-[11px] text-[#004e82]">% conciliado</p>
+          <p class="text-lg font-semibold tabular-nums text-[#004e82]">
+            {{ analisisAvanzado.estadisticas.porcentaje_conciliado }}%
+          </p>
+        </div>
+      </div>
+
+      <!-- Cuadro de control -->
+      <h3 class="mb-2 text-sm font-medium text-gray-700">Cuadro de control</h3>
+      <div class="scroll-fino mb-5 overflow-x-auto">
+        <table class="min-w-full text-xs">
+          <thead>
+            <tr class="text-gray-500">
+              <th class="px-3 py-2 text-left font-medium">Concepto</th>
+              <th class="px-3 py-2 text-right font-medium">Empresa (mayor)</th>
+              <th class="px-3 py-2 text-right font-medium">Banco (extracto)</th>
+              <th class="px-3 py-2 text-right font-medium">Conciliado</th>
+              <th class="px-3 py-2 text-right font-medium">Diferencia neta</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            <tr>
+              <td class="px-3 py-2 text-gray-700">Ingresos</td>
+              <td class="px-3 py-2 text-right tabular-nums">{{ formatoImporte(analisisAvanzado.cuadro_control.ingresos.empresa_total) }}</td>
+              <td class="px-3 py-2 text-right tabular-nums">{{ formatoImporte(analisisAvanzado.cuadro_control.ingresos.banco_total) }}</td>
+              <td class="px-3 py-2 text-right tabular-nums">{{ formatoImporte(analisisAvanzado.cuadro_control.ingresos.conciliados) }}</td>
+              <td class="px-3 py-2 text-right tabular-nums">{{ formatoImporte(analisisAvanzado.cuadro_control.ingresos.diferencia_neta) }}</td>
+            </tr>
+            <tr>
+              <td class="px-3 py-2 text-gray-700">Egresos</td>
+              <td class="px-3 py-2 text-right tabular-nums">{{ formatoImporte(analisisAvanzado.cuadro_control.egresos.empresa_total) }}</td>
+              <td class="px-3 py-2 text-right tabular-nums">{{ formatoImporte(analisisAvanzado.cuadro_control.egresos.banco_total) }}</td>
+              <td class="px-3 py-2 text-right tabular-nums">{{ formatoImporte(analisisAvanzado.cuadro_control.egresos.conciliados) }}</td>
+              <td class="px-3 py-2 text-right tabular-nums">{{ formatoImporte(analisisAvanzado.cuadro_control.egresos.diferencia_neta) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Ajustes contables: gastos del banco sin asiento, a registrar -->
+      <h3 class="mb-2 text-sm font-medium text-gray-700">
+        Ajustes contables ({{ analisisAvanzado.ajustes_contables.length }})
+        <span class="text-[11px] font-normal text-gray-500">— gastos del banco que hay que registrar en Xubio</span>
+      </h3>
+      <p *ngIf="analisisAvanzado.ajustes_contables.length === 0" class="mb-5 text-xs text-gray-500">
+        No hay gastos bancarios sin asiento.
+      </p>
+      <div *ngIf="analisisAvanzado.ajustes_contables.length > 0"
+           class="scroll-fino mb-5 overflow-x-auto">
+        <table class="min-w-full text-xs">
+          <thead>
+            <tr class="text-gray-500">
+              <th class="px-3 py-2 text-left font-medium">Fecha</th>
+              <th class="px-3 py-2 text-left font-medium">Concepto</th>
+              <th class="px-3 py-2 text-left font-medium">Categoría</th>
+              <th class="px-3 py-2 text-right font-medium">Importe</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            <tr *ngFor="let a of analisisAvanzado.ajustes_contables">
+              <td class="whitespace-nowrap px-3 py-2">{{ a.fecha || '—' }}</td>
+              <td class="px-3 py-2">{{ a.concepto || '—' }}</td>
+              <td class="px-3 py-2">{{ etiquetaCategoria(a.categoria) }}</td>
+              <td class="px-3 py-2 text-right tabular-nums">{{ formatoImporte(a.importe) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Partidas pendientes, separadas por lado -->
+      <h3 class="mb-2 text-sm font-medium text-gray-700">
+        Partidas pendientes ({{ analisisAvanzado.partidas_pendientes.length }})
+      </h3>
+      <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div class="rounded-lg border border-gray-200">
+          <div class="flex items-center justify-between border-b border-gray-100 px-3 py-2">
+            <span class="text-xs font-medium text-gray-700">Del Libro Mayor</span>
+            <span class="text-[11px] text-gray-500">en tránsito</span>
+          </div>
+          <p *ngIf="partidasPendientesMayor.length === 0" class="px-3 py-3 text-xs text-gray-500">
+            Sin partidas del mayor.
+          </p>
+          <div *ngIf="partidasPendientesMayor.length > 0" class="scroll-fino overflow-x-auto">
+            <table class="min-w-full text-xs">
+              <thead>
+                <tr class="text-gray-500">
+                  <th class="px-3 py-2 text-left font-medium">Fecha</th>
+                  <th class="px-3 py-2 text-left font-medium">Concepto</th>
+                  <th class="px-3 py-2 text-right font-medium">Importe</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-100">
+                <tr *ngFor="let p of partidasPendientesMayor">
+                  <td class="whitespace-nowrap px-3 py-2">{{ p.fecha || '—' }}</td>
+                  <td class="px-3 py-2">{{ p.concepto || '—' }}</td>
+                  <td class="px-3 py-2 text-right tabular-nums">{{ formatoImporte(p.importe) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="rounded-lg border border-gray-200">
+          <div class="flex items-center justify-between border-b border-gray-100 px-3 py-2">
+            <span class="text-xs font-medium text-gray-700">Del banco</span>
+            <span class="text-[11px] text-gray-500">a investigar</span>
+          </div>
+          <p *ngIf="partidasPendientesBanco.length === 0" class="px-3 py-3 text-xs text-gray-500">
+            Sin partidas del banco.
+          </p>
+          <div *ngIf="partidasPendientesBanco.length > 0" class="scroll-fino overflow-x-auto">
+            <table class="min-w-full text-xs">
+              <thead>
+                <tr class="text-gray-500">
+                  <th class="px-3 py-2 text-left font-medium">Fecha</th>
+                  <th class="px-3 py-2 text-left font-medium">Concepto</th>
+                  <th class="px-3 py-2 text-right font-medium">Importe</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-100">
+                <tr *ngFor="let p of partidasPendientesBanco">
+                  <td class="whitespace-nowrap px-3 py-2">{{ p.fecha || '—' }}</td>
+                  <td class="px-3 py-2">{{ p.concepto || '—' }}</td>
+                  <td class="px-3 py-2 text-right tabular-nums">{{ formatoImporte(p.importe) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
 
   </div>
 </div>

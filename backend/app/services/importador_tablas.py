@@ -116,6 +116,15 @@ ALIAS_COLUMNAS = {
         "NUMERODECUENTA",
         "NROCUENTA",
     },
+    # Columna del Libro Mayor contable: el nombre de la empresa/cliente del
+    # asiento ("Organización", "Razón social"). Va en la columna H del papel de
+    # trabajo; sin este alias el encabezado con tilde no se reconocia y la
+    # columna salia vacia.
+    "ORGANIZACION": {
+        "ORGANIZACION",
+        "ORGANIZACIONNOMBRE",
+        "RAZONSOCIAL",
+    },
 }
 
 # Cuantas filas se miran para encontrar el encabezado cuando el Excel viene con

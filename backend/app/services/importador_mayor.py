@@ -116,6 +116,24 @@ def _importes_mayor(fila) -> tuple[float, float]:
     return debe, haber
 
 
+def _texto(valor) -> str | None:
+    """
+    Texto util de una celda del DataFrame, o None si esta vacia.
+
+    pandas mete float('nan') en las celdas vacias y str(nan) == 'nan': sin este
+    filtro el papel de trabajo terminaba con la cadena "nan" escrita en la
+    Descripcion del Libro Mayor.
+    """
+    if valor is None:
+        return None
+    if isinstance(valor, float) and valor != valor:  # NaN
+        return None
+    texto = str(valor).strip()
+    if texto.lower() in ("nan", "none", "nat"):
+        return None
+    return texto or None
+
+
 def _desde_dataframe(df, fuente: str = "El archivo") -> LecturaMayor:
     """
     Convierte un DataFrame ya leido en las filas que consume el cruce.
@@ -156,7 +174,7 @@ def _desde_dataframe(df, fuente: str = "El archivo") -> LecturaMayor:
     sin_importe = 0
 
     for _, fila in df.iterrows():
-        concepto = str(_columna(fila, "DETALLE", "Concepto") or "").strip()
+        concepto = _texto(_columna(fila, "DETALLE", "Concepto")) or ""
         # El numero de comprobante va por su columna cuando el export la trae
         # ("Comprobante", "Nro comprobante"...). El traductor de columnas la
         # deja en REFERENCIA (la misma canonica que usa el extracto bancario
@@ -164,7 +182,7 @@ def _desde_dataframe(df, fuente: str = "El archivo") -> LecturaMayor:
         # un nombre que no existe. Sin la columna no se inventa: quedar como
         # '—' en la bandeja derecha es mejor que confundirla con el detalle.
         comprobante = (
-            str(_columna(fila, "REFERENCIA") or "").strip() or None
+            _texto(_columna(fila, "REFERENCIA"))
             if "REFERENCIA" in df.columns
             else None
         )
@@ -187,11 +205,16 @@ def _desde_dataframe(df, fuente: str = "El archivo") -> LecturaMayor:
         if fecha is None:
             sin_fecha += 1
 
-        # Extraer campos adicionales del webreport (DOCUMENTO, CUENTA, ORGANIZACION, DESCRIPCION)
-        documento = str(_columna(fila, "DOCUMENTO", "Documento") or "").strip() or None
-        cuenta = str(_columna(fila, "CUENTA", "Cuenta") or "").strip() or None
-        organizacion = str(_columna(fila, "ORGANIZACION", "Organizacion") or "").strip() or None
-        descripcion = str(_columna(fila, "DESCRIPCION", "Descripcion") or "").strip() or None
+        # Campos adicionales del webreport (DOCUMENTO, CUENTA, ORGANIZACION,
+        # DESCRIPCION). La cuenta cae a CUENTACODIGO cuando el webreport no
+        # llena la columna de display: el codigo (1.1.1.2.01) es mejor que
+        # dejar la columna "Cuenta" del papel en blanco.
+        documento = _texto(_columna(fila, "DOCUMENTO", "Documento"))
+        cuenta = _texto(_columna(fila, "CUENTA", "Cuenta")) or _texto(
+            _columna(fila, "CUENTACODIGO", "CuentaCodigo")
+        )
+        organizacion = _texto(_columna(fila, "ORGANIZACION", "Organizacion"))
+        descripcion = _texto(_columna(fila, "DESCRIPCION", "Descripcion"))
 
         movimientos.append(
             {

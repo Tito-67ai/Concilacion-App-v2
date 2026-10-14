@@ -704,6 +704,20 @@ describe('ConciliacionComponent', () => {
         pendientes_mayor: 0,
         porcentaje_conciliado: 0,
       },
+      reporte_markdown: {
+        cuadro_gastos:
+          '| Concepto | SUM de Credito | SUM de Debito en $ |\n| --- | ---: | ---: |\n| COM MANT CT | 0.00 | -350.00 |\n| Suma total | 0.00 | -350.00 |',
+        acta_conciliacion: 'Diferencia sin justificar: $ 0.00',
+        acta: {
+          saldo_libro_mayor: 0,
+          ingresos_no_registrados: 0,
+          egresos_no_registrados: -350,
+          cheques_no_cobrados: 0,
+          transferencias_transito: 0,
+          saldo_banco: -350,
+          diferencia: 0,
+        },
+      },
     };
   }
 
@@ -713,13 +727,39 @@ describe('ConciliacionComponent', () => {
 
     const texto = fixture.nativeElement.textContent;
     expect(texto).toContain('Cuadro de gastos bancarios');
-    expect(texto).toContain('SUM de Crédito');
-    expect(texto).toContain('SUM de Débito en $');
+    expect(texto).toContain('SUM de Credito');
+    expect(texto).toContain('SUM de Debito en $');
     expect(texto).toContain('COM MANT CT');
     // El débito va en negativo y el crédito en cero se muestra igual.
     expect(texto).toContain('-350,00');
     expect(texto).toContain('0,00');
     expect(texto).toContain('Suma total');
+  });
+
+  it('muestra el reporte Markdown y lo copia al portapapeles', async () => {
+    const escrito: string[] = [];
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: (valor: string) => {
+          escrito.push(valor);
+          return Promise.resolve();
+        },
+      },
+    });
+
+    component.analisisAvanzado = analisisAvanzadoDePrueba();
+    await fixture.whenStable();
+
+    const texto = fixture.nativeElement.textContent;
+    expect(texto).toContain('Reporte para copiar');
+    expect(texto).toContain('SUM de Credito');
+    expect(texto).toContain('Diferencia sin justificar');
+
+    await component.copiarReporte();
+    expect(escrito.length).toBe(1);
+    expect(escrito[0]).toContain('Diferencia sin justificar');
+    expect(component.reporteCopiado).toBe(true);
   });
 
   it('con el archivo cargado el boton del Libro Mayor muestra cuantas filas trajo', async () => {

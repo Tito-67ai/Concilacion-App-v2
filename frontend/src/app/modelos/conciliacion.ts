@@ -320,6 +320,27 @@ export interface EstadisticasConciliacion {
   porcentaje_conciliado: number;
 }
 
+/**
+ * Valores del acta de conciliación (puente mayor -> banco). Los egresos y las
+ * transferencias ya vienen en negativo, como se muestran en el informe.
+ */
+export interface ActaConciliacion {
+  saldo_libro_mayor: number;
+  ingresos_no_registrados: number;
+  egresos_no_registrados: number;
+  cheques_no_cobrados: number;
+  transferencias_transito: number;
+  saldo_banco: number;
+  diferencia: number;
+}
+
+/** Reporte listo para copiar: cuadro de gastos y acta, ambos en Markdown. */
+export interface ReporteMarkdown {
+  cuadro_gastos: string;
+  acta_conciliacion: string;
+  acta: ActaConciliacion;
+}
+
 export interface RespuestaConciliacionAvanzada {
   exito: boolean;
   conciliados: Record<string, unknown>[];
@@ -328,4 +349,5 @@ export interface RespuestaConciliacionAvanzada {
   cuadro_control: CuadroControl;
   tabla_dinamica_gastos: GastoBancarioResumen[];
   estadisticas: EstadisticasConciliacion;
+  reporte_markdown?: ReporteMarkdown;
 }

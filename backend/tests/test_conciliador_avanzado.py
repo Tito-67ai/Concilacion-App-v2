@@ -239,6 +239,77 @@ class TestTablaDinamicaGastos:
         assert tabla[1]["concepto"] == "IVA"
 
 
+class TestReporteMarkdown:
+    """Tests del reporte Markdown: cuadro de gastos y acta de conciliación."""
+
+    def test_cuadro_gastos_agrupa_y_cierra_con_suma_total(self):
+        from app.services.reporte_markdown import cuadro_gastos_markdown
+
+        tabla = [
+            {"concepto": "COM MANT CT", "suma_credito": 0.0, "suma_debito": -55000.0},
+            {"concepto": "IVA", "suma_credito": 0.0, "suma_debito": -14076.2},
+        ]
+        md = cuadro_gastos_markdown(tabla)
+
+        assert "| Concepto | SUM de Credito | SUM de Debito en $ |" in md
+        assert "| COM MANT CT | 0.00 | -55,000.00 |" in md
+        assert "| IVA | 0.00 | -14,076.20 |" in md
+        # La fila final suma los débitos del mes.
+        assert "| Suma total | 0.00 | -69,076.20 |" in md
+
+    def test_cuadro_gastos_fuerza_creditos_en_cero(self):
+        from app.services.reporte_markdown import cuadro_gastos_markdown
+
+        tabla = [
+            {"concepto": "IMP S/CRED CT", "suma_credito": 45.0, "suma_debito": -300.0},
+        ]
+        md = cuadro_gastos_markdown(tabla)
+        # Aunque el concepto tenga un crédito, el cuadro de gastos muestra 0.00.
+        assert "| IMP S/CRED CT | 0.00 | -300.00 |" in md
+
+    def test_cuadro_gastos_sin_filas_igual_tiene_suma_total(self):
+        from app.services.reporte_markdown import cuadro_gastos_markdown
+
+        md = cuadro_gastos_markdown([])
+        assert "| Suma total | 0.00 | 0.00 |" in md
+
+    def test_acta_concilia_y_da_diferencia_cero(self):
+        from app.services.reporte_markdown import acta_conciliacion
+
+        # Banco: +1000 cobrado y -100 de gasto; Mayor: +1000 registrado.
+        valores, texto = acta_conciliacion(
+            total_debe_mayor=1000,
+            total_haber_mayor=0,
+            total_credito_banco=1000,
+            total_debito_banco=100,
+            pendientes_banco=[],
+            pendientes_mayor=[],
+            tabla_gastos=[{"concepto": "COM", "suma_debito": -100.0}],
+        )
+
+        assert valores["diferencia"] == 0.0
+        assert "Saldo Final según Libro Mayor: $ 1,000.00" in texto
+        assert "(-) Egresos bancarios no registrados en Mayor (Total Cuadro Gastos): $ -100.00" in texto
+        assert "= Saldo Final según Banco: $ 900.00" in texto
+        assert "Diferencia sin justificar: $ 0.00" in texto
+
+    def test_acta_reporta_la_diferencia_sin_justificar(self):
+        from app.services.reporte_markdown import acta_conciliacion
+
+        # Un débito del banco que no es gasto (no entra en ninguna categoría).
+        valores, _ = acta_conciliacion(
+            total_debe_mayor=0,
+            total_haber_mayor=0,
+            total_credito_banco=0,
+            total_debito_banco=48200,
+            pendientes_banco=[{"credito": 0.0, "debito": 48200.0}],
+            pendientes_mayor=[],
+            tabla_gastos=[],
+        )
+        assert valores["diferencia"] == 48200.0
+
+
+
 class TestConciliacionAvanzadaIntegracion:
     """Tests de integración completa."""
 
@@ -288,6 +359,24 @@ class TestConciliacionAvanzadaIntegracion:
         assert conc["cuit"] == "30-12345678-9"
         assert conc["nombre_tercero"] == "CLIENTE TEST S.A."
         assert conc["cbu"] == "0000000000000000000001"
+
+    def test_el_resultado_trae_el_reporte_markdown(self):
+        """El cruce avanzado arma el cuadro de gastos y el acta en Markdown."""
+        banco = [
+            MovimientoBancario(fecha="2026-07-01", concepto="COBRO", debe=0, haber=1000, saldo=1000, referencia="R1"),
+            MovimientoBancario(fecha="2026-07-02", concepto="COM MANT CT", debe=150, haber=0, saldo=850, referencia="OP-1"),
+        ]
+        mayor = [
+            {"fecha": "2026-07-01", "concepto": "FACTURA 1", "debe": 1000, "haber": 0, "comprobante": "F1"},
+        ]
+
+        resultado = conciliar_avanzado(banco, mayor)
+
+        reporte = resultado.reporte_markdown
+        assert "| Concepto | SUM de Credito | SUM de Debito en $ |" in reporte["cuadro_gastos"]
+        assert "| COM MANT CT | 0.00 | -150.00 |" in reporte["cuadro_gastos"]
+        assert "Diferencia sin justificar:" in reporte["acta_conciliacion"]
+        assert reporte["acta"]["saldo_banco"] == 850.0
 
 
 if __name__ == "__main__":

@@ -425,7 +425,13 @@ async def obtener_sesion_xubio(
     captura: dict[str, str | None] = {"token": None, "empresa": None, "cuenta": None}
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=headless, slow_mo=slow_mo)
+        # Banderas para correr en un server (Docker/CI) sin GUI: sin sandbox de
+        # Chromium. En Windows/local son inofensivas.
+        browser = await p.chromium.launch(
+            headless=headless,
+            slow_mo=slow_mo,
+            args=["--no-sandbox", "--disable-setuid-sandbox"],
+        )
         context = await browser.new_context(locale="es-AR")
         page = await context.new_page()
 

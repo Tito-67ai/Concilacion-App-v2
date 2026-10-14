@@ -38,14 +38,20 @@ modulo.
 from __future__ import annotations
 
 import io
+import logging
 from collections import Counter
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from openpyxl import load_workbook
+from openpyxl.drawing.image import Image as ImagenExcel
+from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, OneCellAnchor
+from openpyxl.drawing.xdr import XDRPositiveSize2D
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils.units import pixels_to_EMU
 from openpyxl.worksheet.worksheet import Worksheet
 
+from app.core.config import settings
 from app.models.schemas import (
     EncabezadoConciliacion,
     MovimientoBancoExport,
@@ -55,8 +61,16 @@ from app.models.schemas import (
 )
 from app.services.clasificacion import es_gasto_bancario, _subcategoria_gasto
 
+logger = logging.getLogger(__name__)
+
 DIRECTORIO_PLANTILLAS = Path(__file__).resolve().parent.parent / "assets" / "plantillas"
 NOMBRE_PLANTILLA = "FO 02-03 Conciliación Bancaria.xlsx"
+
+# El logo va en el recuadro A1:B3 del membrete (celda combinada de la
+# plantilla). Se escala para entrar ahi sin deformarse.
+RUTA_LOGO = Path(settings.LOGO_EMPRESA)
+ANCHO_LOGO_MAX = 118  # px, entra justo en A:B con un margen
+ALTO_LOGO_MAX = 78    # px, entra en las filas 1-3
 
 HOJA_MAYOR = "Libro Mayor"
 HOJA_MOVIMIENTOS = "Movimientos Bancarios"
@@ -161,6 +175,66 @@ def _restaurar_formulas_membrete(hoja: Worksheet) -> None:
     hoja["I6"] = "=+'Libro Mayor'!I6"
     hoja["I5"].number_format = FORMATO_PERIODO
     hoja["I5"].alignment = ALINEACION_CENTRO
+
+
+def _logo_escalado(ruta: Path) -> tuple[io.BytesIO, int, int]:
+    """Lee el logo y lo devuelve escalado (sin deformar) para el recuadro A1:B3.
+
+    Se redimensiona con Pillow antes de insertarlo: asi el tamano con el que se
+    guarda en el .xlsx ya es el definitivo y no hay que pelear con los anchors
+    del dibujo de openpyxl.
+    """
+    from PIL import Image as ImagenPIL
+
+    with ImagenPIL.open(ruta) as imagen:
+        ancho, alto = imagen.size
+        if ancho <= 0 or alto <= 0:
+            raise ValueError(f"El logo {ruta} no tiene tamano valido")
+        escala = min(ANCHO_LOGO_MAX / ancho, ALTO_LOGO_MAX / alto)
+        nuevo_ancho = max(1, round(ancho * escala))
+        nuevo_alto = max(1, round(alto * escala))
+        redimensionada = imagen.convert("RGBA").resize(
+            (nuevo_ancho, nuevo_alto), ImagenPIL.LANCZOS
+        )
+        buffer = io.BytesIO()
+        redimensionada.save(buffer, format="PNG")
+        buffer.seek(0)
+        return buffer, nuevo_ancho, nuevo_alto
+
+
+def _insertar_logo(hoja: Worksheet, ruta: Path | None = None) -> None:
+    """Pega el logo de la empresa en el recuadro vacio del membrete (A1:B3).
+
+    Si el archivo no existe o no se puede leer, se sigue sin logo: el papel de
+    trabajo tiene que salir igual aunque falte la imagen.
+    """
+    ruta_logo = ruta or RUTA_LOGO
+    if not Path(ruta_logo).exists():
+        logger.warning("No se encontro el logo de la empresa en %s", ruta_logo)
+        return
+    try:
+        buffer, ancho, alto = _logo_escalado(Path(ruta_logo))
+    except Exception:
+        logger.exception("No se pudo preparar el logo %s", ruta_logo)
+        return
+
+    imagen = ImagenExcel(buffer)
+    imagen.width = ancho
+    imagen.height = alto
+    # Anclado a A1 con un pequeno margen, tamano exacto en EMU.
+    imagen.anchor = OneCellAnchor(
+        _from=AnchorMarker(
+            col=0,
+            colOff=pixels_to_EMU(6),
+            row=0,
+            rowOff=pixels_to_EMU(8),
+        ),
+        ext=XDRPositiveSize2D(
+            cx=pixels_to_EMU(ancho),
+            cy=pixels_to_EMU(alto),
+        ),
+    )
+    hoja.add_image(imagen)
 
 
 def _periodo_a_fecha(periodo: str | None) -> date | None:
@@ -594,6 +668,10 @@ def exportar(solicitud: SolicitudExportacion) -> bytes:
         # Membrete
         _escribir_membrete(mayor, solicitud.encabezado)
         _restaurar_formulas_membrete(movimientos)
+        # Logo de la empresa en el recuadro vacio del membrete (A1:B3), en las
+        # dos hojas: las dos muestran el encabezado.
+        _insertar_logo(mayor)
+        _insertar_logo(movimientos)
 
         # Multisets para saber que lineas no tienen coincidencia (van en verde)
         pendientes_xubio = Counter(

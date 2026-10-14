@@ -58,6 +58,12 @@ class Settings(BaseSettings):
     # de forma directa, sin proxy, asi que el backend tiene que escuchar ahi.
     PUERTO: int = 8000
 
+    # Logo de la empresa que va en el recuadro A1:B3 del membrete del papel de
+    # trabajo FO 02-03. Por defecto el que viene con la app (assets/logos/logo.
+    # png); se puede apuntar a otro archivo con LOGO_EMPRESA en el .env. Si el
+    # archivo no existe, la exportacion sigue sin logo en vez de romperse.
+    LOGO_EMPRESA: str = str(RAIZ_BACKEND / "app" / "assets" / "logos" / "logo.png")
+
 
 # Instancia global para usar en toda la app
 settings = Settings()

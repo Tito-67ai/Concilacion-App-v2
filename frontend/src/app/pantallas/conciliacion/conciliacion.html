@@ -666,8 +666,8 @@
           <thead>
             <tr class="text-gray-500">
               <th class="px-3 py-2 text-left font-medium">Concepto</th>
-              <th class="px-3 py-2 text-right font-medium">SUM de Crédito</th>
-              <th class="px-3 py-2 text-right font-medium">SUM de Débito en $</th>
+              <th class="px-3 py-2 text-right font-medium">SUM de Credito</th>
+              <th class="px-3 py-2 text-right font-medium">SUM de Debito en $</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
@@ -685,6 +685,26 @@
             </tr>
           </tfoot>
         </table>
+      </div>
+
+      <!-- Reporte para copiar: el cuadro de gastos y el acta de conciliación
+           en Markdown. Lo arma el backend ya formateado; acá solo se muestra
+           para pegarlo en el informe. -->
+      <div *ngIf="reporteMarkdown as reporte" class="mb-5">
+        <div class="mb-2 flex items-center justify-between gap-3">
+          <h3 class="text-sm font-medium text-gray-700">
+            Reporte para copiar
+            <span class="text-[11px] font-normal text-gray-500">— cuadro de gastos y acta en Markdown</span>
+          </h3>
+          <button
+            type="button"
+            (click)="copiarReporte()"
+            class="flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs text-gray-700 shadow-sm transition-colors duration-200 hover:border-[#004e82]/40 hover:text-[#004e82]">
+            {{ reporteCopiado ? 'Copiado' : 'Copiar' }}
+          </button>
+        </div>
+        <pre class="scroll-fino mb-3 overflow-x-auto rounded-lg border border-gray-200 bg-gray-50 p-3 text-[11px] leading-5 text-gray-800">{{ reporte.cuadro_gastos }}</pre>
+        <pre class="scroll-fino overflow-x-auto rounded-lg border border-gray-200 bg-gray-50 p-3 text-[11px] leading-5 text-gray-800">{{ reporte.acta_conciliacion }}</pre>
       </div>
 
       <!-- Partidas pendientes, separadas por lado -->

@@ -409,3 +409,51 @@ def test_muchas_filas_no_se_pisan():
     # La ultima fila de datos deberia estar mucho mas abajo
     ultima_con_dato = max(r for r in range(11, 100) if hoja.cell(row=r, column=1).value)
     assert ultima_con_dato >= 49  # 10 (saldo inicial) + 39 movimientos
+
+
+# ----------------------------------------------------------------------
+# Logo de la empresa en el membrete (recuadro A1:B3)
+# ----------------------------------------------------------------------
+
+
+def test_el_logo_va_en_el_membrete_de_las_dos_hojas():
+    """El membrete queda con el logo en el recuadro vacio de la izquierda."""
+    libro = _libro(exportador.exportar(_solicitud()))
+    for nombre in ("Libro Mayor", "Movimientos Bancarios"):
+        imagenes = libro[nombre]._images
+        assert len(imagenes) == 1, f"{nombre} no tiene el logo"
+        ancla = imagenes[0].anchor
+        # Arriba a la izquierda: A1 (col 0, row 0).
+        assert ancla._from.col == 0
+        assert ancla._from.row == 0
+
+
+def test_el_logo_entra_escalado_sin_deformarse(tmp_path):
+    """Un logo cuadrado se achica respetando la proporcion hasta el recuadro."""
+    from PIL import Image as ImagenPIL
+    from openpyxl import Workbook
+
+    ruta = tmp_path / "logo.png"
+    ImagenPIL.new("RGBA", (400, 400), (0, 0, 0, 0)).save(ruta)
+
+    hoja = Workbook().active
+    exportador._insertar_logo(hoja, ruta)
+
+    assert len(hoja._images) == 1
+    imagen = hoja._images[0]
+    assert imagen.width <= exportador.ANCHO_LOGO_MAX
+    assert imagen.height <= exportador.ALTO_LOGO_MAX
+    # Cuadrado entra cuadrado: no se estira.
+    assert imagen.width == imagen.height
+
+
+def test_sin_archivo_de_logo_la_exportacion_no_se_rompe(tmp_path, caplog):
+    """Si el logo no existe, se exporta igual y solo queda el aviso."""
+    from openpyxl import Workbook
+
+    contenido = exportador.exportar(_solicitud())
+    assert contenido  # la exportacion normal sigue andando
+
+    hoja = Workbook().active
+    exportador._insertar_logo(hoja, tmp_path / "no_existe.png")
+    assert len(hoja._images) == 0

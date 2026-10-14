@@ -342,6 +342,51 @@ class SolicitudLoginXubio(BaseModel):
     password: str
 
 
+class AfiliadoConXubio(BaseModel):
+    """Un afiliado del catalogo del bot: existe en Xubio (tiene_xubio=True).
+
+    `afiliado_id` es el id local del afiliado (o el id de Xubio cuando no se
+    paso una lista local) y `xubio_cliente_id` es el id de la cuenta en Xubio,
+    el que se manda para pedir el Libro Mayor de ese cliente.
+    """
+    afiliado_id: str
+    nombre: str
+    cuit: Optional[str] = None
+    xubio_cliente_id: int
+    tiene_xubio: bool = True
+
+
+class SolicitudBotXubio(BaseModel):
+    """Entrada del pipeline del bot (POST /xubio/bot/sincronizar).
+
+    Sin `afiliado_id` devuelve solo el catalogo de afiliados con Xubio. Con un
+    afiliado seleccionado hace ademas el fetch del Libro Mayor del periodo.
+
+    `afiliados` es la lista local opcional: si viene, se cruza por CUIT contra
+    Xubio y solo se devuelven los que coinciden (el resto queda tiene_xubio
+    False y no se lista). Sin lista local, todos los activos de Xubio entran.
+    """
+    desde: Optional[str] = None
+    hasta: Optional[str] = None
+    afiliado_id: Optional[str] = None
+    organizacion_report_code: Optional[str] = None
+    afiliados: list[Afiliado] = Field(default_factory=list)
+
+
+class RespuestaBotXubio(BaseModel):
+    """Contrato de salida del pipeline del bot de Xubio.
+
+    `status` es SUCCESS | FALLBACK_MANUAL | ERROR. FALLBACK_MANUAL significa que
+    hay que pedir el archivo a mano (sin sesion, timeout o afiliado sin cuenta
+    en Xubio); ERROR es una falla inesperada.
+    """
+    status: str
+    afiliados_con_xubio: list[AfiliadoConXubio] = Field(default_factory=list)
+    data_mayor_normalizada: list[dict] = Field(default_factory=list)
+    execution_logs: list[str] = Field(default_factory=list)
+    error_message: Optional[str] = None
+
+
 # ----------------------------------------------------------------------
 # Conciliación Avanzada (FO 02-03 completo)
 # ----------------------------------------------------------------------
@@ -514,6 +559,29 @@ class TablaDinamicaGasto(BaseModel):
     porcentaje_acumulado: float
 
 
+class ActaConciliacion(BaseModel):
+    """Valores del acta de conciliación (puente mayor -> banco).
+
+    `egresos_no_registrados` y `transferencias_transito` ya vienen con el signo
+    negativo con el que se muestran en el informe.
+    """
+    saldo_libro_mayor: float = 0.0
+    ingresos_no_registrados: float = 0.0
+    egresos_no_registrados: float = 0.0
+    cheques_no_cobrados: float = 0.0
+    transferencias_transito: float = 0.0
+    saldo_banco: float = 0.0
+    diferencia: float = 0.0
+
+
+class ReporteMarkdown(BaseModel):
+    """Reporte listo para pegar: cuadro de gastos y acta, ambos en Markdown."""
+    cuadro_gastos: str = ""
+    acta_conciliacion: str = ""
+    acta: ActaConciliacion = Field(default_factory=ActaConciliacion)
+
+
+
 class EstadisticasConciliacion(BaseModel):
     total_movimientos_banco: int
     total_movimientos_mayor: int
@@ -532,6 +600,7 @@ class RespuestaConciliacionAvanzada(BaseModel):
     cuadro_control: CuadroControl
     tabla_dinamica_gastos: list[TablaDinamicaGasto] = Field(default_factory=list)
     estadisticas: EstadisticasConciliacion
+    reporte_markdown: ReporteMarkdown = Field(default_factory=ReporteMarkdown)
 
 
 class SolicitudConciliacionAvanzada(BaseModel):

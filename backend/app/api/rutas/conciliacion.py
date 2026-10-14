@@ -151,6 +151,7 @@ async def cruzar_avanzado(solicitud: SolicitudConciliacionAvanzada):
     - Cuadro de control FO 02-03 (ingresos/egresos, diferencias, totales)
     - Tabla dinámica de gastos bancarios por subcategoría
     - Estadísticas de conciliación
+    - Reporte Markdown: cuadro de gastos + acta de conciliación (para el informe)
 
     Si el frontend ya tiene el extracto crudo (17 columnas), mándalo en
     `extracto_crudo` para enriquecer con CUIT/CBU/Nombre/CodConcepto/Canal/Banco.
@@ -186,4 +187,5 @@ async def cruzar_avanzado(solicitud: SolicitudConciliacionAvanzada):
         "cuadro_control": resultado.cuadro_control,
         "tabla_dinamica_gastos": resultado.tabla_dinamica_gastos,
         "estadisticas": resultado.estadisticas,
+        "reporte_markdown": resultado.reporte_markdown,
     }

@@ -118,6 +118,26 @@ async def renovar_sesion(email: str, password: str, headless: bool) -> dict:
     }
 
 
+async def renovar_con_credenciales_guardadas(headless: bool = True) -> dict:
+    """Renueva la sesion con el email/password guardados en el .env.
+
+    La usan la fase 1 del pipeline del bot y el reintento automatico del
+    cliente web ante un 401/403: en ese momento no hay nadie para tipear las
+    credenciales, asi que se leen del .env. Sin credenciales guardadas levanta
+    RuntimeError (el pipeline lo traduce a FALLBACK_MANUAL).
+    """
+    env = leer_env(RUTA_ENV)
+    email = (env.get("XUBIO_EMAIL") or "").strip()
+    password = env.get("XUBIO_PASSWORD") or ""
+    if not email or not password:
+        raise RuntimeError(
+            "No hay XUBIO_EMAIL / XUBIO_PASSWORD guardadas en el .env: inicia "
+            "sesion una vez desde la pantalla de Xubio para poder renovar la "
+            "sesion automaticamente."
+        )
+    return await renovar_sesion(email=email, password=password, headless=headless)
+
+
 def cerrar_sesion(olvidar_credenciales: bool = False) -> dict:
     """Olvida la sesion web de Xubio (token/cookie) y, opcional, las credenciales.
 

@@ -26,6 +26,11 @@ def normalizar_afiliado(texto: str | None) -> str:
     return re.sub(r"[^A-Z0-9]+", " ", texto).strip()
 
 
+def normalizar_cuit(texto: str | None) -> str:
+    """Deja solo los digitos del CUIT: "30-71615408-0" -> "30716154080"."""
+    return _cuit_normalizado(texto)
+
+
 def _cuit_normalizado(texto: str | None) -> str:
     if not texto:
         return ""

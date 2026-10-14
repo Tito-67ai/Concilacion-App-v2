@@ -23,6 +23,7 @@ from typing import Any, Optional
 
 from app.models.schemas import MovimientoBancario
 from app.services.clasificacion import clasificar, es_gasto_bancario
+from app.services.reporte_markdown import generar_reporte
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,9 @@ class ResultadoConciliacion:
     cuadro_control: dict = field(default_factory=dict)
     tabla_dinamica_gastos: list[dict] = field(default_factory=list)
     estadisticas: dict = field(default_factory=dict)
+    # Reporte ya formateado para pegar en el informe: el cuadro de gastos en
+    # Markdown y el acta de conciliación (ver reporte_markdown.py).
+    reporte_markdown: dict = field(default_factory=dict)
 
 
 def _importe_banco(mov: MovimientoBancario) -> Decimal:
@@ -545,7 +549,18 @@ def conciliar_avanzado(
     # 7. Tabla dinámica de gastos
     tabla_gastos = _tabla_dinamica_gastos(ajustes)
 
-    # 8. Estadísticas
+    # 8. Reporte Markdown (cuadro de gastos + acta de conciliación)
+    reporte = generar_reporte(
+        total_debe_mayor=sum((m.debe for m in mayor), Decimal("0.00")),
+        total_haber_mayor=sum((m.haber for m in mayor), Decimal("0.00")),
+        total_credito_banco=sum((m.haber for m in banco), Decimal("0.00")),
+        total_debito_banco=sum((m.debe for m in banco), Decimal("0.00")),
+        pendientes_banco=pendientes_banco,
+        pendientes_mayor=pendientes_mayor,
+        tabla_gastos=tabla_gastos,
+    )
+
+    # 9. Estadísticas
     stats = _estadisticas(banco, mayor, pares, ajustes, pendientes)
 
     logger.info(
@@ -560,4 +575,5 @@ def conciliar_avanzado(
         cuadro_control=control,
         tabla_dinamica_gastos=tabla_gastos,
         estadisticas=stats,
+        reporte_markdown=reporte,
     )

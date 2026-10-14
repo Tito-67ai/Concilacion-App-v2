@@ -20,6 +20,7 @@ import {
   MovimientoMayor,
   ParConciliado,
   PartidaPendiente,
+  ReporteMarkdown,
   RespuestaAfiliados,
   RespuestaBancos,
   RespuestaConciliacionAvanzada,
@@ -1801,6 +1802,42 @@ export class ConciliacionComponent implements OnInit {
    */
   formatoImporteCuadro(valor: number | null | undefined): string {
     return this.formatoImporte(valor) || '0,00';
+  }
+
+  /**
+   * El reporte Markdown que arma el backend: el cuadro de gastos agrupado y el
+   * acta de conciliación, listos para pegar en el informe.
+   */
+  get reporteMarkdown(): ReporteMarkdown | null {
+    return this.analisisAvanzado?.reporte_markdown ?? null;
+  }
+
+  private _reporteCopiado: boolean = false;
+  get reporteCopiado(): boolean { return this._reporteCopiado; }
+
+  /**
+   * Copia al portapapeles los dos bloques del reporte. Se avisa con un cartel
+   * efímero porque el portapapeles no da ninguna señal visible.
+   */
+  async copiarReporte(): Promise<void> {
+    const reporte = this.reporteMarkdown;
+    if (!reporte) return;
+
+    const texto = `${reporte.cuadro_gastos}\n\n${reporte.acta_conciliacion}`;
+    try {
+      await navigator.clipboard.writeText(texto);
+      this._reporteCopiado = true;
+      this.notificar();
+      setTimeout(() => {
+        this._reporteCopiado = false;
+        this.notificar();
+      }, 2000);
+    } catch {
+      // Sin permiso de portapapeles (o fuera de un contexto seguro) queda el
+      // texto a la vista para seleccionarlo a mano.
+      this._reporteCopiado = false;
+      this.notificar();
+    }
   }
 
   /**

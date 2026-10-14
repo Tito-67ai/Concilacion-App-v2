@@ -8,10 +8,13 @@ from app.core.config import settings
 from app.models.schemas import (
     Afiliado,
     MovimientoBancario,
+    RespuestaBotXubio,
+    SolicitudBotXubio,
     SolicitudClasificarMayor,
     SolicitudCruceAfiliados,
     SolicitudLoginXubio,
 )
+from app.services import bot_xubio
 from app.services import sesion_xubio as servicio_sesion
 from app.services.conciliador import conciliar_movimientos
 from app.services.cruce_afiliados import cruzar_movimientos_con_afiliados
@@ -98,14 +101,15 @@ async def ejecutar_cruce(
 
 
 async def _descargar_afiliados() -> list[dict]:
-    """Baja la lista completa de afiliados desde la web de Xubio.
+    """Baja la lista completa de afiliados ACTIVOS desde la web de Xubio.
 
-    Separado del manejo de errores para que los dos endpoints de abajo lo
-    compartan. Sin XUBIO_WEB_COOKIE el cliente no hace ninguna llamada y aca
-    se responde 503: no se inventan datos.
+    Separado del manejo de errores para que los endpoints lo compartan. Sin
+    XUBIO_WEB_COOKIE el cliente no hace ninguna llamada y aca se responde 503:
+    no se inventan datos. Se descartan los clientes inactivos: el bot devuelve
+    unicamente los afiliados con los que se puede operar.
     """
     try:
-        return await cliente_web.obtener_afiliados()
+        afiliados = await cliente_web.obtener_afiliados()
     except XubioWebNoConfigurado as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
@@ -113,16 +117,17 @@ async def _descargar_afiliados() -> list[dict]:
         raise HTTPException(
             status_code=502, detail=f"No se pudo consultar la API web de Xubio: {e}"
         )
+    return [a for a in afiliados if bot_xubio.es_activo(a)]
 
 
 @router.get("/afiliados")
 async def listar_afiliados():
     """
-    Descarga la lista completa de clientes/afiliados desde la web de Xubio.
+    Descarga la lista de clientes/afiliados ACTIVOS desde la web de Xubio.
 
     El backend pagina solo las paginas que haga falta (findAllPaginado trae
-    de a 20). Sin XUBIO_WEB_COOKIE en el .env responde 503 y no llama a
-    nadie.
+    de a 20) y descarta los clientes inactivos. Sin XUBIO_WEB_COOKIE en el
+    .env responde 503 y no llama a nadie.
     """
     crudo = await _descargar_afiliados()
     try:
@@ -334,3 +339,35 @@ async def clasificar_mayor(solicitud: SolicitudClasificarMayor):
         },
         "datos": datos,
     }
+
+
+@router.post("/bot/sincronizar", response_model=RespuestaBotXubio)
+async def sincronizar_bot(solicitud: SolicitudBotXubio):
+    """Corre el pipeline de 4 fases del bot y devuelve el contrato de salida.
+
+    Fase 1 reusa la sesion del .env o corre el login (headless); fase 2 baja el
+    catalogo de afiliados activos y, si se manda lista local, la cruza por CUIT;
+    fases 3 y 4 (con `afiliado_id`) bajan el Libro Mayor por HTTP y lo
+    normalizan en memoria. Los 401/403 del cliente web disparan una renovacion
+    de sesion y un reintento automatico.
+
+    Siempre responde 200 con el contrato: el resultado real viaja en `status`
+    (SUCCESS | FALLBACK_MANUAL | ERROR). FALLBACK_MANUAL le dice a la UI que
+    ofrezca subir el archivo a mano.
+    """
+    afiliados_locales = [a.model_dump() for a in solicitud.afiliados] or None
+    try:
+        return await bot_xubio.sincronizar(
+            desde=solicitud.desde,
+            hasta=solicitud.hasta,
+            afiliado_id=solicitud.afiliado_id,
+            organizacion_report_code=solicitud.organizacion_report_code,
+            afiliados_locales=afiliados_locales,
+        )
+    except Exception as e:  # noqa: BLE001 - ultimo cinturon del endpoint
+        logger.exception("El pipeline del bot de Xubio fallo de forma inesperada")
+        return RespuestaBotXubio(
+            status=bot_xubio.STATUS_ERROR,
+            execution_logs=[f"ERROR - {e}"],
+            error_message=str(e),
+        )

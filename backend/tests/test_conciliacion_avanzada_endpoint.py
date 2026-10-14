@@ -34,6 +34,7 @@ def test_cruzar_avanzado_devuelve_conciliados_ajustes_pendientes():
     assert "partidas_pendientes" in data
     assert "cuadro_control" in data
     assert "tabla_dinamica_gastos" in data
+    assert "reporte_markdown" in data
     assert "estadisticas" in data
 
 

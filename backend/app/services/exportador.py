@@ -110,7 +110,8 @@ ANCHOS_MOV = {"A": 14.0, "B": 45.0, "C": 18.0, "D": 18.0, "E": 18.0, "I": 16.0, 
 RELLENO_ENCABEZADO = PatternFill("solid", fgColor="FF00B0F0")
 RELLENO_CONCILIADO = PatternFill("solid", fgColor="FFFFFF00")
 RELLENO_PENDIENTE_BANCO = PatternFill("solid", fgColor="FF93C47D")
-FUENTE_ENCABEZADO = Font(name="Calibri", size=11, bold=True)
+FUENTE_ENCABEZADO = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+FUENTE_ENCABEZADO_OSCURO = Font(name="Calibri", size=11, bold=True)  # para fondos claros
 FUENTE_TITULO = Font(name="Calibri", size=11, bold=True)
 FUENTE_SALDO_INICIAL = Font(name="Calibri", size=11, bold=True)
 FUENTE_NORMAL = Font(name="Calibri", size=11)

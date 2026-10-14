@@ -416,29 +416,30 @@ def _armar_cuadro_subcategorias(
     fila_inicio: int,
     pendientes_banco: list[PendienteExport],
 ) -> None:
-    """Cuadro de sumas por subcategoria a la derecha de la tabla (cols I-K).
+    """Cuadro de sumas por concepto bancario real a la derecha de la tabla (cols I-K).
 
-    Columnas: I=Concepto, J=Suma Crédito, K=Suma Débito.
-    Solo muestra subcategorias con importe > 0.
+    Columnas: I=Concepto (original del extracto), J=Suma Crédito, K=Suma Débito.
+    Solo muestra conceptos con importe > 0.
     """
-    from app.services.clasificacion import _subcategoria_gasto
 
-    # Acumular por subcategoria
+    # Acumular por concepto original (normalizado)
     sumas: dict[str, dict[str, float]] = {}
     for p in pendientes_banco:
         if not es_gasto_bancario(p.concepto):
             continue
-        sub = _subcategoria_gasto(p.concepto)
-        if not sub:
-            continue
+        concepto_original = (p.concepto or "").strip()
+        # Normalizar: mayúsculas, sin espacios múltiples
+        concepto_norm = " ".join(concepto_original.upper().split())
+        if not concepto_norm:
+            concepto_norm = "SIN CONCEPTO"
         debe = _importe(p.debe)
         haber = _importe(p.haber)
         if debe == 0 and haber == 0:
             continue
-        if sub not in sumas:
-            sumas[sub] = {"credito": 0.0, "debito": 0.0}
-        sumas[sub]["credito"] += haber
-        sumas[sub]["debito"] += debe
+        if concepto_norm not in sumas:
+            sumas[concepto_norm] = {"credito": 0.0, "debito": 0.0}
+        sumas[concepto_norm]["credito"] += haber
+        sumas[concepto_norm]["debito"] += debe
 
     if not sumas:
         return

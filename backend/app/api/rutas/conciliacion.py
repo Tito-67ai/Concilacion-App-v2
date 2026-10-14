@@ -19,8 +19,14 @@ import tempfile
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
-from app.models.schemas import RespuestaMayor, SolicitudCruce
+from app.models.schemas import (
+    RespuestaMayor,
+    SolicitudCruce,
+    RespuestaConciliacionAvanzada,
+    SolicitudConciliacionAvanzada,
+)
 from app.services.conciliador import conciliar_movimientos
+from app.services.conciliador_avanzado import conciliar_avanzado
 from app.services.importador_mayor import leer_mayor
 from app.services.importador_tablas import EXTENSIONES
 from app.services.procesador_central import ErrorDeExtraccion, _borrar
@@ -125,4 +131,59 @@ def cruzar_contra_mayor(solicitud: SolicitudCruce):
             "no_impactados_en_banco": len(resultado["pendientes_xubio"]),
         },
         "tablas": resultado,
+    }
+
+
+@router.post("/cruzar-avanzado", response_model=RespuestaConciliacionAvanzada)
+async def cruzar_avanzado(solicitud: SolicitudConciliacionAvanzada):
+    """
+    Conciliación avanzada FO 02-03 completa.
+
+    Realiza matching exacto por importe (centavo) + fecha ±3 días, clasifica:
+    - CONCILIADOS: matching exacto importe + fecha
+    - AJUSTES CONTABLES: movimientos solo en banco que son gastos bancarios
+      (comisiones, impuestos, retenciones, intereses, sellados, percepciones)
+    - PARTIDAS PENDIENTES: movimientos solo en mayor (pagos/cheques no debitados)
+      + movimientos en banco no gastos sin par (transferencias no identificadas)
+
+    Incluye:
+    - Enriquecimiento con CUIT/CBU/Nombre del extracto crudo (17 columnas)
+    - Cuadro de control FO 02-03 (ingresos/egresos, diferencias, totales)
+    - Tabla dinámica de gastos bancarios por subcategoría
+    - Estadísticas de conciliación
+
+    Si el frontend ya tiene el extracto crudo (17 columnas), mándalo en
+    `extracto_crudo` para enriquecer con CUIT/CBU/Nombre/CodConcepto/Canal/Banco.
+    """
+    if not solicitud.movimientos_banco:
+        raise HTTPException(
+            status_code=400,
+            detail="No hay movimientos bancarios para cruzar. Cargar primero un extracto.",
+        )
+    if not solicitud.movimientos_mayor:
+        raise HTTPException(
+            status_code=400,
+            detail="No hay movimientos del Libro Mayor para cruzar. "
+            "Cargar primero el mayor (archivo o 'Traer de Xubio').",
+        )
+
+    try:
+        resultado = conciliar_avanzado(
+            movimientos_banco=solicitud.movimientos_banco,
+            movimientos_mayor=solicitud.movimientos_mayor,
+            extracto_crudo=solicitud.extracto_crudo,
+            tolerancia_dias=solicitud.tolerancia_dias,
+        )
+    except Exception as e:
+        logger.exception("Falló la conciliación avanzada")
+        raise HTTPException(status_code=500, detail=f"Error en la conciliación avanzada: {e}")
+
+    return {
+        "exito": True,
+        "conciliados": resultado.conciliados,
+        "ajustes_contables": resultado.ajustes_contables,
+        "partidas_pendientes": resultado.partidas_pendientes,
+        "cuadro_control": resultado.cuadro_control,
+        "tabla_dinamica_gastos": resultado.tabla_dinamica_gastos,
+        "estadisticas": resultado.estadisticas,
     }

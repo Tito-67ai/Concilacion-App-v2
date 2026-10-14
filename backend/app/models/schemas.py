@@ -331,3 +331,195 @@ class SolicitudLoginXubio(BaseModel):
 
     email: str
     password: str
+
+
+# ----------------------------------------------------------------------
+# Conciliación Avanzada (FO 02-03 completo)
+# ----------------------------------------------------------------------
+
+class MovimientoBancoCrudo(BaseModel):
+    """Extracto crudo (17 columnas) tal como viene del Home Banking / ICBC.
+
+    Se usa solo para enriquecer: buscar CUIT, CBU, Nombre, Cod Concepto, Canal,
+    Banco emisor cuando el matching automático no identifica al tercero.
+    """
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    fecha_contable: Optional[date] = Field(None, alias="Fecha contable")
+    cod_concepto: Optional[str] = Field(None, alias="Cod de Concepto")
+    concepto: str = Field("", alias="Concepto")
+    debito: float = Field(0.0, alias="Debito en $")
+    credito: float = Field(0.0, alias="Credito en $")
+    saldo: float = Field(0.0, alias="Saldo en $")
+    info_complementaria: Optional[str] = Field(None, alias="Informacion Complementaria")
+    nro_cheque: Optional[str] = Field(None, alias="Nro de cheque")
+    sucursal_origen: Optional[str] = Field(None, alias="Sucursal Origen")
+    canal: Optional[str] = Field(None, alias="Canal")
+    banco: Optional[str] = Field(None, alias="Banco")
+    cbu_alias: Optional[str] = Field(None, alias="CBU/Alias")
+    tipo_trf: Optional[str] = Field(None, alias="Tipo trf")
+    referencia: Optional[str] = Field(None, alias="Referencia")
+    nombre: Optional[str] = Field(None, alias="Nombre")
+    tipo_doc: Optional[str] = Field(None, alias="Tipo doc")
+    nro_doc: Optional[str] = Field(None, alias="Nro doc")
+
+    _fecha = field_validator("fecha_contable", mode="before")(_normalizar_fecha)
+
+
+class ConciliadoAvanzado(BaseModel):
+    """Un par conciliado con toda la trazabilidad."""
+    fecha: Optional[date] = None
+    concepto_banco: str = ""
+    concepto_mayor: str = ""
+    referencia_banco: Optional[str] = None
+    comprobante_mayor: Optional[str] = None
+    importe_banco: float = 0.0
+    importe_mayor: float = 0.0
+    debe_banco: float = 0.0
+    haber_banco: float = 0.0
+    debe_mayor: float = 0.0
+    haber_mayor: float = 0.0
+    saldo_banco: float = 0.0
+    saldo_mayor: float = 0.0
+    categoria: str = ""
+    cuadra: bool = True
+    diferencia_dias: int = 0
+    cuit: Optional[str] = None
+    cbu: Optional[str] = None
+    nombre_tercero: Optional[str] = None
+
+    _fecha = field_validator("fecha", mode="before")(_normalizar_fecha)
+
+
+class AjusteContable(BaseModel):
+    """Movimiento solo en banco (gasto bancario sin asiento contable)."""
+    origen: str = "ajuste_contable"
+    fecha: Optional[date] = None
+    concepto: str = ""
+    referencia: Optional[str] = None
+    debito: float = 0.0
+    credito: float = 0.0
+    importe: float = 0.0
+    saldo: float = 0.0
+    categoria: str = ""
+    cuit: Optional[str] = None
+    cbu: Optional[str] = None
+    nombre_tercero: Optional[str] = None
+    cod_concepto: Optional[str] = None
+    canal: Optional[str] = None
+    banco_emisor: Optional[str] = None
+
+    _fecha = field_validator("fecha", mode="before")(_normalizar_fecha)
+
+
+class PartidaPendienteBanco(BaseModel):
+    """Movimiento en banco sin par, que NO es gasto bancario (ej. transferencia)."""
+    origen: str = "pendiente_banco"
+    fecha: Optional[date] = None
+    concepto: str = ""
+    referencia: Optional[str] = None
+    debito: float = 0.0
+    credito: float = 0.0
+    importe: float = 0.0
+    saldo: float = 0.0
+    categoria: str = ""
+    cuit: Optional[str] = None
+    cbu: Optional[str] = None
+    nombre_tercero: Optional[str] = None
+    cod_concepto: Optional[str] = None
+    canal: Optional[str] = None
+    banco_emisor: Optional[str] = None
+
+    _fecha = field_validator("fecha", mode="before")(_normalizar_fecha)
+
+
+class PartidaPendienteMayor(BaseModel):
+    """Movimiento en mayor sin par en banco (pago/cheque no debitado)."""
+    origen: str = "pendiente_mayor"
+    fecha: Optional[date] = None
+    concepto: str = ""
+    referencia: Optional[str] = None
+    comprobante: Optional[str] = None
+    debe: float = 0.0
+    haber: float = 0.0
+    importe: float = 0.0
+    saldo: float = 0.0
+    categoria: str = ""
+    documento: Optional[str] = None
+    cuenta: Optional[str] = None
+    organizacion: Optional[str] = None
+    descripcion: Optional[str] = None
+
+    _fecha = field_validator("fecha", mode="before")(_normalizar_fecha)
+
+
+class PartidasPendientesUnion(BaseModel):
+    """Union type discriminado por 'origen'."""
+    origen: str
+    fecha: Optional[date] = None
+    concepto: str = ""
+    referencia: Optional[str] = None
+    comprobante: Optional[str] = None
+    debe: float = 0.0
+    haber: float = 0.0
+    importe: float = 0.0
+    saldo: float = 0.0
+    categoria: str = ""
+    # campos opcionales según origen
+    cuit: Optional[str] = None
+    cbu: Optional[str] = None
+    nombre_tercero: Optional[str] = None
+    cod_concepto: Optional[str] = None
+    canal: Optional[str] = None
+    banco_emisor: Optional[str] = None
+    comprobante: Optional[str] = None
+    documento: Optional[str] = None
+    cuenta: Optional[str] = None
+    organizacion: Optional[str] = None
+    descripcion: Optional[str] = None
+
+    _fecha = field_validator("fecha", mode="before")(_normalizar_fecha)
+
+
+class CuadroControl(BaseModel):
+    """Cuadro de control FO 02-03."""
+    ingresos: dict
+    egresos: dict
+    ajustes_contables: dict
+    partidas_pendientes: dict
+    conciliados: dict
+
+
+class TablaDinamicaGasto(BaseModel):
+    concepto: str
+    suma: float
+    cantidad: int
+    porcentaje: float
+    porcentaje_acumulado: float
+
+
+class EstadisticasConciliacion(BaseModel):
+    total_movimientos_banco: int
+    total_movimientos_mayor: int
+    conciliados: int
+    ajustes_contables: int
+    pendientes_banco: int
+    pendientes_mayor: int
+    porcentaje_conciliado: float
+
+
+class RespuestaConciliacionAvanzada(BaseModel):
+    exito: bool = True
+    conciliados: list[ConciliadoAvanzado] = Field(default_factory=list)
+    ajustes_contables: list[AjusteContable] = Field(default_factory=list)
+    partidas_pendientes: list[PartidasPendientesUnion] = Field(default_factory=list)
+    cuadro_control: CuadroControl
+    tabla_dinamica_gastos: list[TablaDinamicaGasto] = Field(default_factory=list)
+    estadisticas: EstadisticasConciliacion
+
+
+class SolicitudConciliacionAvanzada(BaseModel):
+    movimientos_banco: list[MovimientoBancario]
+    movimientos_mayor: list[dict]
+    extracto_crudo: Optional[list[MovimientoBancoCrudo]] = None
+    tolerancia_dias: int = 3

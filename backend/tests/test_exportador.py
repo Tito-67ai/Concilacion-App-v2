@@ -340,6 +340,88 @@ def test_movimientos_bancarios_fechas_formato_dd_mm_yyyy():
 
 
 # ----------------------------------------------------------------------
+# Cuadro de asientos sin coincidencia (debajo de cada tabla)
+# ----------------------------------------------------------------------
+
+
+def test_cuadro_asientos_banco_va_debajo_de_la_tabla():
+    """Los pendientes del banco se detallan abajo, con una fila en blanco de separacion."""
+    hoja = _movimientos(exportador.exportar(_solicitud()))
+    # Tabla: encabezado 8, saldo inicial 9, datos 10-13 -> cuadro desde la 16
+    assert hoja["A16"].value.startswith("Asientos sin coincidencia en el banco")
+    assert hoja["A16"].font.bold
+    # Fila 15 en blanco: el cuadro no es una continuation de los datos
+    assert all(hoja.cell(row=15, column=col).value in (None, "") for col in range(1, 6))
+
+    encabezados = ["Fecha", "Detalle", "Debe", "Haber", "Importe"]
+    assert [hoja.cell(row=17, column=col).value for col in range(1, 6)] == encabezados
+
+    # COMISION (05/07) e IVA (06/07), en orden de fecha
+    assert hoja["A18"].value.date() == date(2026, 7, 5)
+    assert hoja["B18"].value.startswith("COMISION")
+    assert hoja["C18"].value == 150   # Debe
+    assert hoja["D18"].value is None  # Haber
+    assert hoja["E18"].value == 150   # Importe
+
+    assert hoja["A19"].value.date() == date(2026, 7, 6)
+    assert hoja["C19"].value == 200
+    assert hoja["E19"].value == 200
+
+    # Total del cuadro
+    assert hoja["B20"].value == "TOTAL"
+    assert hoja["C20"].value == 350
+    assert hoja["D20"].value in (None, 0)
+    assert hoja["E20"].value == 350
+
+
+def test_cuadro_asientos_mayor_va_debajo_de_la_tabla():
+    hoja = _mayor(exportador.exportar(_solicitud()))
+    # Datos 11-13 -> cuadro desde la 16
+    assert hoja["A16"].value.startswith("Asientos sin coincidencia en el Libro Mayor")
+    assert [hoja.cell(row=17, column=col).value for col in range(1, 6)] == [
+        "Fecha", "Detalle", "Debe", "Haber", "Importe"
+    ]
+    # FCA-3 ALQUILER: el comprobante va pegado al detalle para poder identificarlo
+    assert hoja["A18"].value.date() == date(2026, 7, 4)
+    assert hoja["B18"].value == "ALQUILER · FCA-3"
+    assert hoja["C18"].value == 300
+    assert hoja["D18"].value is None
+    assert hoja["E18"].value == 300
+    assert hoja["B19"].value == "TOTAL"
+    assert hoja["C19"].value == 300
+
+
+def test_cuadro_asientos_no_se_escribe_sin_pendientes():
+    """Sin asientos sin coincidencia no hay cuadro: ni titulo ni encabezado."""
+    sol = _solicitud(pendientes_xubio=[], pendientes_banco=[])
+    for hoja in (_mayor(exportador.exportar(sol)), _movimientos(exportador.exportar(sol))):
+        encontrados = [
+            hoja.cell(row=fila, column=1).value
+            for fila in range(14, hoja.max_row + 1)
+            if hoja.cell(row=fila, column=1).value
+        ]
+        assert all(not str(v).startswith("Asientos sin coincidencia") for v in encontrados)
+
+
+def test_cuadro_asientos_importes_con_formato_contable():
+    hoja = _movimientos(exportador.exportar(_solicitud()))
+    for fila in (18, 19, 20):
+        for col in (3, 4, 5):
+            celda = hoja.cell(row=fila, column=col)
+            if celda.value not in (None, 0):
+                fmt = celda.number_format
+                assert "#,##0.00" in fmt and "-" in fmt and "@" in fmt
+                assert celda.border.top.style == "thin"
+                assert celda.border.bottom.style == "thin"
+
+
+def test_el_filtro_del_extracto_no_traga_el_cuadro():
+    """El auto_filter termina en el ultimo dato, no sobre el cuadro de abajo."""
+    hoja = _movimientos(exportador.exportar(_solicitud()))
+    assert hoja.auto_filter.ref == "A8:E13"
+
+
+# ----------------------------------------------------------------------
 # Formatos generales
 # ----------------------------------------------------------------------
 

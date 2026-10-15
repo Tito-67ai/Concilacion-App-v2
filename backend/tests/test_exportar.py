@@ -147,6 +147,24 @@ def test_una_fecha_en_formato_argentino_se_acepta():
     assert "COMISION" in _valores(libro["Movimientos Bancarios"])
 
 
+def test_el_cuadro_de_asientos_sin_coincidencia_viaja_en_el_archivo():
+    """Los pendientes que manda el frontend llegan al Excel como cuadro de asientos."""
+    respuesta = client.post("/api/exportar/conciliacion", json=_payload())
+
+    assert respuesta.status_code == 200
+    libro = openpyxl.load_workbook(io.BytesIO(respuesta.content))
+    hoja = libro["Movimientos Bancarios"]
+
+    valores = _valores(hoja)
+    assert any(
+        isinstance(v, str) and v.startswith("Asientos sin coincidencia en el banco")
+        for v in valores
+    )
+    # El asiento de COMISION (el unico pendiente del payload) con su total
+    assert "TOTAL" in valores
+    assert 150 in valores
+
+
 def test_el_ruta_esta_registrada_en_el_documento():
     # El registro se mira en el esquema de OpenAPI y no en app.routes: en la
     # version de FastAPI del proyecto las entradas de los routers incluidos no

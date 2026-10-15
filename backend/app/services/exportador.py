@@ -29,6 +29,12 @@ Cuadro de sumas por subcategoria (cols I-K de Movimientos Bancarios):
     Sellado | X | Y
     TOTAL | X | Y
 
+Cuadro de asientos sin coincidencia (debajo de cada tabla, cols A-E):
+    Una fila en blanco lo separa de la tabla. Trae un asiento por fila de lo
+    que no tuvo pareja en el cruce, con su total:
+    Fecha | Detalle | Debe | Haber | Importe
+    No se escribe cuando no hay pendientes.
+
 La plantilla (assets/plantillas/FO 02-03 Conciliación Bancaria.xlsx) aporta solo
 el membrete: el formulario, su codigo, el titulo y las etiquetas azules son de
 la auditoria y no se rehacen en codigo. El cuerpo de las tablas lo escribe este
@@ -118,6 +124,13 @@ COLUMNAS_MOV = [
 ]
 
 # Anchos de columna (caracteres)
+# Cuadro de asientos sin coincidencia (debajo de cada tabla). Cinco columnas
+# en A-E de las dos hojas: es el mismo ancho que ya traen las tablas.
+COLUMNAS_ASIENTOS = ["Fecha", "Detalle", "Debe", "Haber", "Importe"]
+# Una fila en blanco separa la tabla del cuadro, para que el filtro de Excel
+# del extracto no lo trague ni parezca una continuacion de los datos.
+FILA_SEPARACION_CUADRO = 2
+
 ANCHOS_MAYOR = {"A": 12.0, "B": 22.0, "C": 28.0, "D": 16.0, "E": 16.0, "F": 18.0, "G": 35.0, "H": 22.0, "I": 18.0}
 ANCHOS_MOV = {"A": 14.0, "B": 45.0, "C": 18.0, "D": 18.0, "E": 18.0, "I": 16.0, "J": 18.0, "K": 18.0}
 
@@ -368,8 +381,12 @@ def _fecha_saldo_inicial(solicitud: SolicitudExportacion) -> date | None:
     return None
 
 
-def _armar_libro_mayor(hoja: Worksheet, solicitud: SolicitudExportacion, pendientes_xubio: Counter) -> None:
-    """Una sola tabla: Saldo Inicial + todos los movimientos del mayor ordenados por fecha."""
+def _armar_libro_mayor(hoja: Worksheet, solicitud: SolicitudExportacion, pendientes_xubio: Counter) -> int:
+    """Una sola tabla: Saldo Inicial + todos los movimientos del mayor ordenados por fecha.
+
+    Devuelve la primera fila libre debajo de la tabla, donde va el cuadro de
+    asientos sin coincidencia.
+    """
     # Anchos
     for col, ancho in ANCHOS_MAYOR.items():
         hoja.column_dimensions[col].width = ancho
@@ -448,6 +465,8 @@ def _armar_libro_mayor(hoja: Worksheet, solicitud: SolicitudExportacion, pendien
 
         fila += 1
 
+    return fila
+
 
 # ----------------------------------------------------------------------
 # Hoja MOVIMIENTOS BANCARIOS
@@ -458,7 +477,7 @@ def _armar_movimientos_bancarios(
     hoja: Worksheet,
     solicitud: SolicitudExportacion,
     pendientes_banco_counter: Counter,
-) -> None:
+) -> int:
     """Tabla de 5 columnas: Fecha | Concepto | Debito | Credito | Saldo (acumulado).
 
     Encabezado sin relleno y con filtro de Excel (A8:E{ultima fila}). En los datos
@@ -469,6 +488,9 @@ def _armar_movimientos_bancarios(
                   cuadro de partidas en banco pendientes de registracion.
       - sin color: sin coincidencia y no es gasto (ej. transferencia sin
                   identificar): partida comercial a auditar a mano.
+
+    Devuelve la primera fila libre debajo de la tabla, donde va el cuadro de
+    asientos sin coincidencia.
     """
     # Anchos
     for col, ancho in ANCHOS_MOV.items():
@@ -539,9 +561,106 @@ def _armar_movimientos_bancarios(
         fila += 1
 
     # Filtro de Excel sobre la tabla (A8:E{ultima fila}). Arranca en el
-    # encabezado para que los desplegables queden ahi, como el modelo.
+    # encabezado para que los desplegables queden ahi, como el modelo. El
+    # filtro termina en el ultimo dato: el cuadro de asientos de abajo queda
+    # afuera para que no se vaya con la fila filtrada.
     ultima = max(fila - 1, FILA_SALDO_INICIAL_MOV)
     hoja.auto_filter.ref = f"A{FILA_ENCABEZADO_MOV}:E{ultima}"
+
+    return fila
+
+
+def _armar_cuadro_asientos(
+    hoja: Worksheet,
+    fila_inicio: int,
+    pendientes: list[PendienteExport],
+    titulo: str,
+) -> int | None:
+    """Cuadro chico bajo la tabla con los asientos que no tuvieron coincidencia.
+
+    columnas: Fecha | Detalle | Debe | Haber | Importe, con fila de TOTAL.
+    `fila_inicio` es la primera fila libre debajo de la tabla principal (una
+    fila en blanco de separacion). Devuelve la siguiente fila libre, o None si
+    no hay nada sin coincidencia (no se escribe el cuadro vacio).
+    """
+    if not pendientes:
+        return None
+
+    filas = sorted(pendientes, key=lambda p: (_fecha(p.fecha) or date.min, p.concepto or ""))
+
+    fila = fila_inicio
+
+    celda_titulo = hoja.cell(row=fila, column=1, value=titulo)
+    celda_titulo.font = FUENTE_TITULO
+    fila += 1
+
+    for i, nombre in enumerate(COLUMNAS_ASIENTOS):
+        celda = hoja.cell(row=fila, column=1 + i, value=nombre)
+        celda.font = FUENTE_ENCABEZADO_OSCURO  # sin relleno, como los demas cuadros
+        celda.alignment = ALINEACION_CENTRO
+        celda.border = BORDE_CUADRO
+    fila += 1
+
+    total_debe = 0.0
+    total_haber = 0.0
+    for p in filas:
+        debe = _importe(p.debe)
+        haber = _importe(p.haber)
+        # El importe es el valor del asiento sin signo: si el pedido lo trae
+        # explicito se respeta; si no, sale del debe o del haber.
+        importe = _importe(p.importe) or debe or haber
+
+        detalle = (p.concepto or "").strip()
+        referencia = (p.comprobante or "").strip() or (p.referencia or "").strip()
+        if referencia and referencia not in detalle:
+            detalle = f"{detalle} · {referencia}" if detalle else referencia
+
+        _escribir_fila(
+            hoja,
+            fila,
+            [
+                _fecha(p.fecha),
+                detalle,
+                debe if debe else None,
+                haber if haber else None,
+                importe if importe else None,
+            ],
+            formato_importe_idx={2, 3, 4},  # C, D, E
+        )
+        for col in (1, 2, 3, 4, 5):
+            celda = hoja.cell(row=fila, column=col)
+            celda.border = BORDE_CUADRO
+            if col >= 3:
+                celda.number_format = FORMATO_IMPORTE
+                celda.alignment = ALINEACION_DERECHA
+
+        total_debe += debe
+        total_haber += haber
+        fila += 1
+
+    # Fila TOTAL
+    _escribir_fila(
+        hoja,
+        fila,
+        [
+            None,
+            "TOTAL",
+            total_debe if total_debe else None,
+            total_haber if total_haber else None,
+            total_debe + total_haber if (total_debe or total_haber) else None,
+        ],
+        formato_importe_idx={2, 3, 4},
+    )
+    for col in (1, 2, 3, 4, 5):
+        celda = hoja.cell(row=fila, column=col)
+        celda.border = BORDE_CUADRO
+        if col >= 3:
+            celda.number_format = FORMATO_IMPORTE
+            celda.alignment = ALINEACION_DERECHA
+        if col == 2:
+            celda.font = FUENTE_TITULO
+
+    return fila + 1
 
 
 def _armar_cuadro_subcategorias(
@@ -692,9 +811,25 @@ def exportar(solicitud: SolicitudExportacion) -> bytes:
 
         # Colores FO 02-03: coincidencia = amarillo; sin coincidencia = verde
         # solo si es gasto/impuesto bancario, el resto queda sin color.
-        _armar_libro_mayor(mayor, solicitud, pendientes_xubio)
-        _armar_movimientos_bancarios(movimientos, solicitud, pendientes_banco)
+        fin_mayor = _armar_libro_mayor(mayor, solicitud, pendientes_xubio)
+        fin_mov = _armar_movimientos_bancarios(movimientos, solicitud, pendientes_banco)
         _armar_cuadro_subcategorias(movimientos, FILA_ENCABEZADO_MOV, solicitud.pendientes_banco)
+
+        # Cuadro chico bajo cada tabla con los asientos que no tuvieron
+        # coincidencia: lo que quedo verde/sin color arriba, detallado fila por
+        # fila con su total. Si no hay pendientes no se escribe nada.
+        _armar_cuadro_asientos(
+            mayor,
+            fin_mayor + FILA_SEPARACION_CUADRO,
+            solicitud.pendientes_xubio,
+            f"Asientos sin coincidencia en el Libro Mayor ({len(solicitud.pendientes_xubio)})",
+        )
+        _armar_cuadro_asientos(
+            movimientos,
+            fin_mov + FILA_SEPARACION_CUADRO,
+            solicitud.pendientes_banco,
+            f"Asientos sin coincidencia en el banco ({len(solicitud.pendientes_banco)})",
+        )
 
         # Hoja extracto bruto si hay datos (opcional)
         if hasattr(solicitud, "extracto_bruto") and solicitud.extracto_bruto:

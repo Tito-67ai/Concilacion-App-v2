@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from datetime import date, datetime
 
 
@@ -389,6 +389,68 @@ class RespuestaAfiliados(BaseModel):
     # La lista completa ya paginada: el backend llama a todas las paginas que
     # haga falta y aca llega entera.
     datos: list[Afiliado]
+
+
+class Estudio(BaseModel):
+    """Un estudio/empresa a los que puede entrar la cuenta logueada de Xubio.
+
+    La cuenta de un estudio contable habilita decenas de empresas (un cliente
+    por estudio). El selector de la barra superior de la web de Xubio las
+    lista; cada una entra por un tenant distinto (`/NXV/Relogin?tenant=tnt_XX`).
+
+    `origen` dice de donde salio la entrada:
+
+      * "empresa": del selector de la barra superior (la fuente de verdad del
+        orden y de los tenants, pero sin CUIT).
+      * "cliente": del catalogo de afiliados de la contabilidad (trae CUIT y
+        organizacionId, que es el codigo con el que el Libro Mayor filtra).
+      * "ambos": se matcheo una contra la otra por nombre normalizado. Es lo
+        que se devuelve cuando las dos fuentes estan disponibles.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    # Identidad dentro de la app. Prefija el origen para que la misma clave no
+    # pueda designar dos cosas distintas ("empresa:tnt_123456").
+    clave: str
+    nombre: str
+    origen: Literal["empresa", "cliente", "ambos"]
+    # Del selector superior: con esto se cambia de estudio en la web.
+    tenant: Optional[str] = None
+    # Del catalogo de clientes: el codigo con el que el Libro Mayor filtra
+    # (p_OrganizacionReportCode) y el id del cliente en Xubio.
+    organizacion_id: Optional[int] = None
+    cuit: Optional[str] = None
+    # "empresa" (la del selector, que es la que tiene abierta la sesion) o
+    # "seleccion" (la que elegio el usuario en la app).
+    es_actual: bool = False
+    activo: bool = True
+
+
+class SolicitudEstudio(BaseModel):
+    """El estudio que el usuario elige en el selector de la barra superior."""
+
+    clave: str
+
+
+class RespuestaEstudios(BaseModel):
+    """Lo que muestra el selector: el listado y cual esta activo."""
+
+    exito: bool
+    # False si no hay XUBIO_WEB_TOKEN ni XUBIO_WEB_COOKIE: sin eso no se puede
+    # bajar nada y el selector tiene que ofrecer el login.
+    configurada: bool
+    # True si el catalogo de estudio ya bajo alguna vez (puede quedar vacio si
+    # la cuenta no tiene empresas cargadas).
+    catalogo_cargado: bool
+    # El nombre de la empresa que tiene abierta la sesion de Xubio ahora, si
+    # el bot lo pudo leer del selector superior.
+    empresa_en_sesion: Optional[str] = None
+    # El estudio elegido en la app (sobrevive a reinicios del backend).
+    actual: Optional[Estudio] = None
+    estudios: list[Estudio] = Field(default_factory=list)
+    # Motivo por el que no se pudo bajar el catalogo, si no se pudo.
+    aviso: Optional[str] = None
 
 
 class SolicitudCruceAfiliados(BaseModel):

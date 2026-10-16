@@ -38,6 +38,10 @@ RUTA_ENV = RAIZ_BACKEND / ".env"
 def estado_sesion() -> dict:
     """Resume si la app ya puede hablar con la web de Xubio."""
     env = leer_env(RUTA_ENV)
+    from app.services import estudios_xubio
+
+    estudio = estudios_xubio.estudio_actual()
+    catalogo = estudios_xubio.cargar_catalogo()
     return {
         # Configurada: lo que usa el server para llamar a la web de Xubio.
         "configurada": bool(
@@ -49,6 +53,10 @@ def estado_sesion() -> dict:
             (env.get("XUBIO_EMAIL") or "").strip()
             and (env.get("XUBIO_PASSWORD") or "").strip()
         ),
+        # El estudio elegido en el selector y si ya hay catalogo bajado.
+        "estudio": estudio.model_dump() if estudio else None,
+        "catalogo_cargado": bool(catalogo["estudios"] or catalogo["solo_clientes"]),
+        "empresa_en_sesion": catalogo.get("empresa_en_sesion"),
     }
 
 
@@ -57,17 +65,51 @@ def guardar_credenciales(email: str, password: str) -> None:
     escribir_env({"XUBIO_EMAIL": email, "XUBIO_PASSWORD": password}, RUTA_ENV)
 
 
+async def _guardar_catalogo_de_estudios(capturada: SesionCapturada) -> dict:
+    """Baja los clientes con la sesion nueva y guarda el catalogo de estudios.
+
+    El bot solo llega a leer el selector de la barra superior (nombre + tenant);
+    el CUIT y el organizacionId salen del catalogo de clientes, que se baja por
+    HTTP con el mismo token que acaba de capturar. Si esa bajada falla, el
+    catalogo se guarda igual con lo que traia el selector: tener los estudios
+    sin CUIT es mejor que no tenerlos.
+    """
+    from app.services import estudios_xubio
+    from app.services.xubio_web_client import XubioWebClient
+
+    empresas = capturada.estudios or []
+    clientes: list[dict] = []
+    aviso = None
+    try:
+        clientes = await XubioWebClient().obtener_afiliados()
+    except Exception as e:  # noqa: BLE001 - no se tira abajo el login por esto
+        aviso = f"No se pudo bajar el catalogo de clientes: {e}"
+        logger.warning(aviso)
+
+    catalogo = estudios_xubio.guardar_catalogo(
+        empresas, clientes, capturada.empresa_en_sesion
+    )
+    return {
+        "empresa_en_sesion": capturada.empresa_en_sesion,
+        "estudios": len(catalogo["estudios"]),
+        "solo_clientes": len(catalogo["solo_clientes"]),
+        "aviso": aviso,
+    }
+
+
 async def renovar_sesion(email: str, password: str, headless: bool) -> dict:
     """Corre el bot, guarda lo capturado en el .env y resume el resultado.
 
-    Devuelve {"token": bool, "cookie": bool, "empresa": bool, "cuenta": bool}.
-    El bot levanta RuntimeError si no logra capturar una sesion valida (p.ej.
-    quedo un paso a mano).
+    Devuelve {"token": bool, "cookie": bool, "empresa": bool, "cuenta": bool,
+    "empresa_en_sesion": str|None, "estudios": int, "aviso": str|None}. El bot
+    levanta RuntimeError si no logra capturar una sesion valida (p.ej. quedo un
+    paso a mano).
 
     Ademas de escribir el .env, actualiza `settings` en memoria: el cliente de
     la web lee la config en cada request, asi que sin esto el token recien
     capturado no servia hasta reiniciar uvicorn (y el panel seguia diciendo
-    que no habia sesion).
+    que no habia sesion). Tambien baja el catalogo de estudios (el selector de
+    la barra superior + los clientes de la contabilidad) en el mismo viaje.
     """
     capturada = await obtener_sesion_xubio(
         email=email,
@@ -93,7 +135,9 @@ async def renovar_sesion(email: str, password: str, headless: bool) -> dict:
         )
     escribir_env(actualizar, RUTA_ENV)
 
-    # Mismo valor que quedo en el .env, pero vivo en el proceso actual.
+    # Mismo valor que quedo en el .env, pero vivo en el proceso actual. Va
+    # ANTES del catalogo: el cliente que baja los clientes lee `settings`, asi
+    # que con la sesion vieja en memoria contestaria 401.
     if capturada.token:
         settings.XUBIO_WEB_TOKEN = capturada.token
     if capturada.cookie:
@@ -103,18 +147,25 @@ async def renovar_sesion(email: str, password: str, headless: bool) -> dict:
     if capturada.cuenta_report_code:
         settings.XUBIO_WEB_CUENTA_REPORT_CODE = capturada.cuenta_report_code
 
+    catalogo = await _guardar_catalogo_de_estudios(capturada)
+
     logger.info(
-        "Sesion de Xubio renovada (token=%s cookie=%s empresa=%s cuenta=%s)",
+        "Sesion de Xubio renovada (token=%s cookie=%s empresa=%s cuenta=%s "
+        "estudios=%s)",
         bool(capturada.token),
         bool(capturada.cookie),
         bool(capturada.empresa_report_code),
         bool(capturada.cuenta_report_code),
+        catalogo["estudios"],
     )
     return {
         "token": bool(capturada.token),
         "cookie": bool(capturada.cookie),
         "empresa": bool(capturada.empresa_report_code),
         "cuenta": bool(capturada.cuenta_report_code),
+        "empresa_en_sesion": catalogo["empresa_en_sesion"],
+        "estudios": catalogo["estudios"],
+        "aviso": catalogo["aviso"],
     }
 
 

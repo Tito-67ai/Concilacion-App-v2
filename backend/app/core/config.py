@@ -39,6 +39,19 @@ class Settings(BaseSettings):
     XUBIO_WEB_EMPRESA_REPORT_CODE: str = ""
     XUBIO_WEB_CUENTA_REPORT_CODE: str = "ARBOL_ID=1__SEPNO__0"
 
+    # El estudio que el usuario eligio en el selector de la barra superior.
+    # `clave` es la identidad del estudio dentro de la app ("empresa:tnt_123456"
+    # si salio del selector superior, "cliente:123" si salio del catalogo de
+    # clientes); `tenant` es el con el que se cambia de estudio en la web y
+    # `organizacion_id` el codigo con el que el Libro Mayor filtra por empresa
+    # (p_OrganizacionReportCode). Quedan vacios hasta que el usuario elige: no
+    # se inventa un estudio por defecto porque el mayor de otro estudio cerraria
+    # con cifras que parecen reales.
+    XUBIO_ESTUDIO_CLAVE: str = ""
+    XUBIO_ESTUDIO_NOMBRE: str = ""
+    XUBIO_ESTUDIO_TENANT: str = ""
+    XUBIO_ORGANIZACION_REPORT_CODE: str = ""
+
     # El bot de sesion (sesion_xubio_bot.py) abre el navegador de Playwright
     # visible por defecto, porque el login de Visma Connect puede pedir captcha
     # o verificacion que se completa a mano en esa ventana. En un server de

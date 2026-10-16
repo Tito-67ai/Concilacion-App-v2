@@ -14,10 +14,32 @@ from fastapi.testclient import TestClient
 
 from app.core import config
 from app.main import app
+from app.services import estudios_xubio
 from app.services import sesion_xubio as servicio_sesion
 from app.services.sesion_xubio_bot import SesionCapturada
 
 cliente_test = TestClient(app)
+
+
+def _estado(configurada: bool, credenciales: bool) -> dict:
+    """La forma completa que devuelve /api/xubio/sesion sin estudio elegido."""
+    return {
+        "configurada": configurada,
+        "credenciales": credenciales,
+        "estudio": None,
+        "catalogo_cargado": False,
+        "empresa_en_sesion": None,
+    }
+
+
+async def _catalogo_vacio(capturada: SesionCapturada) -> dict:
+    """Fake de la bajada del catalogo: no toca la red."""
+    return {
+        "empresa_en_sesion": capturada.empresa_en_sesion,
+        "estudios": len(capturada.estudios or []),
+        "solo_clientes": 0,
+        "aviso": None,
+    }
 
 
 @pytest.fixture
@@ -30,6 +52,16 @@ def env_temporal(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     monkeypatch.setattr(servicio_sesion, "RUTA_ENV", env)
+    # El catalogo de estudios tambien va a un archivo temporal: si no, el estado
+    # de sesion leeria el catalogo real que dejo una validacion en vivo.
+    monkeypatch.setattr(estudios_xubio, "RUTA_CATALOGO", tmp_path / ".xubio_estudios.json")
+    monkeypatch.setattr(estudios_xubio, "RUTA_ENV", env)
+    # La eleccion de estudio vive en `settings` (global): se resetea para que un
+    # test no arrastre la eleccion de otro.
+    monkeypatch.setattr(config.settings, "XUBIO_ESTUDIO_CLAVE", "")
+    monkeypatch.setattr(config.settings, "XUBIO_ESTUDIO_NOMBRE", "")
+    monkeypatch.setattr(config.settings, "XUBIO_ESTUDIO_TENANT", "")
+    monkeypatch.setattr(config.settings, "XUBIO_ORGANIZACION_REPORT_CODE", "")
     return env
 
 
@@ -40,7 +72,7 @@ def test_estado_sesion_sin_nada(env_temporal, monkeypatch):
     respuesta = cliente_test.get("/api/xubio/sesion")
 
     assert respuesta.status_code == 200
-    assert respuesta.json() == {"configurada": False, "credenciales": False}
+    assert respuesta.json() == _estado(False, False)
 
 
 def test_estado_sesion_con_token_y_credenciales(env_temporal, monkeypatch):
@@ -55,7 +87,7 @@ def test_estado_sesion_con_token_y_credenciales(env_temporal, monkeypatch):
     respuesta = cliente_test.get("/api/xubio/sesion")
 
     assert respuesta.status_code == 200
-    assert respuesta.json() == {"configurada": True, "credenciales": True}
+    assert respuesta.json() == _estado(True, True)
 
 
 def test_estado_sesion_cookie_alcanza_sola(env_temporal, monkeypatch):
@@ -153,7 +185,7 @@ def test_salir_de_xubio_borra_token_y_cookie_sin_tocar_credenciales(env_temporal
 
     assert respuesta.status_code == 200
     # Sin sesion pero con las credenciales: el login puede renovar de nuevo.
-    assert respuesta.json() == {"configurada": False, "credenciales": True}
+    assert respuesta.json() == _estado(False, True)
     guardado = env_temporal.read_text(encoding="utf-8")
     # Las claves de sesion quedaron vacias en su lugar (sin duplicar lineas) y
     # las credenciales intactas.
@@ -180,6 +212,7 @@ def test_renovar_sesion_guarda_codigos_y_toca_la_memoria(env_temporal, monkeypat
         )
 
     monkeypatch.setattr(servicio_sesion, "obtener_sesion_xubio", bot_fake)
+    monkeypatch.setattr(servicio_sesion, "_guardar_catalogo_de_estudios", _catalogo_vacio)
     monkeypatch.setattr(config.settings, "XUBIO_WEB_TOKEN", "")
     monkeypatch.setattr(config.settings, "XUBIO_WEB_COOKIE", "")
 
@@ -192,6 +225,9 @@ def test_renovar_sesion_guarda_codigos_y_toca_la_memoria(env_temporal, monkeypat
         "cookie": True,
         "empresa": True,
         "cuenta": True,
+        "empresa_en_sesion": None,
+        "estudios": 0,
+        "aviso": None,
     }
     guardado = env_temporal.read_text(encoding="utf-8")
     assert "XUBIO_WEB_TOKEN=309-token-nuevo" in guardado
@@ -212,6 +248,7 @@ def test_renovar_sin_codigos_no_pisa_lo_configurado(env_temporal, monkeypatch):
         return SesionCapturada(token="309-token", cookie=None)
 
     monkeypatch.setattr(servicio_sesion, "obtener_sesion_xubio", bot_fake)
+    monkeypatch.setattr(servicio_sesion, "_guardar_catalogo_de_estudios", _catalogo_vacio)
 
     resultado = asyncio.run(
         servicio_sesion.renovar_sesion("a@b.com", "x", headless=False)
@@ -222,6 +259,9 @@ def test_renovar_sin_codigos_no_pisa_lo_configurado(env_temporal, monkeypatch):
         "cookie": False,
         "empresa": False,
         "cuenta": False,
+        "empresa_en_sesion": None,
+        "estudios": 0,
+        "aviso": None,
     }
     guardado = env_temporal.read_text(encoding="utf-8")
     assert "XUBIO_WEB_TOKEN=309-token" in guardado
@@ -240,7 +280,7 @@ def test_cerrar_sesion_olvida_tambien_las_credenciales(env_temporal, monkeypatch
     respuesta = cliente_test.delete("/api/xubio/sesion?olvidar_credenciales=true")
 
     assert respuesta.status_code == 200
-    assert respuesta.json() == {"configurada": False, "credenciales": False}
+    assert respuesta.json() == _estado(False, False)
     guardado = env_temporal.read_text(encoding="utf-8")
     # Las credenciales ya no estan; las claves quedaron vacias en su lugar.
     assert "XUBIO_EMAIL=tito" not in guardado

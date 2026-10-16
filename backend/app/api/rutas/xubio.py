@@ -7,14 +7,18 @@ from fastapi import APIRouter, HTTPException, Query
 from app.core.config import settings
 from app.models.schemas import (
     Afiliado,
+    Estudio,
     MovimientoBancario,
     RespuestaBotXubio,
+    RespuestaEstudios,
     SolicitudBotXubio,
     SolicitudClasificarMayor,
     SolicitudCruceAfiliados,
+    SolicitudEstudio,
     SolicitudLoginXubio,
 )
 from app.services import bot_xubio
+from app.services import estudios_xubio
 from app.services import sesion_xubio as servicio_sesion
 from app.services.conciliador import conciliar_movimientos
 from app.services.cruce_afiliados import cruzar_movimientos_con_afiliados
@@ -148,6 +152,13 @@ async def descargar_libro_mayor(
     hasta: Optional[str] = Query(
         None, description="Fecha final (YYYY-MM-DD). Por defecto, hoy."
     ),
+    organizacion_report_code: Optional[str] = Query(
+        None,
+        description=(
+            "Filtra el mayor a un estudio/cliente (p_OrganizacionReportCode). "
+            "Si no se pasa, se usa el estudio elegido en el selector."
+        ),
+    ),
 ):
     """
     Baja el Libro Mayor por la sesion web de Xubio (webreport), no por la API
@@ -159,9 +170,18 @@ async def descargar_libro_mayor(
     movimientos del cruce (misma forma que /conciliacion/mayor) y se devuelve
     en `movimientos`; `datos` queda con el crudo para diagnostico. Sin
     credenciales de sesion responde 503 sin llamar a nadie.
+
+    Si no se pasa `organizacion_report_code`, se usa el del estudio elegido en
+    el selector de la barra superior: es lo que hace que el mayor salga del
+    estudio que el usuario esta mirando y no del que tenga abierto la sesion.
     """
+    organizacion = (organizacion_report_code or "").strip()
+    if not organizacion:
+        organizacion = estudios_xubio.organizacion_report_code_actual()
     try:
-        datos = await cliente_web.obtener_libro_mayor(desde=desde, hasta=hasta)
+        datos = await cliente_web.obtener_libro_mayor(
+            desde=desde, hasta=hasta, organizacion_report_code=organizacion or None
+        )
     except XubioWebNoConfigurado as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
@@ -238,6 +258,112 @@ async def estado_de_sesion_xubio():
     XUBIO_EMAIL y XUBIO_PASSWORD, las que usa el bot para renovar la sesion.
     El frontend lo usa para decidir si muestra el login del panel de afiliados.
     """
+    return servicio_sesion.estado_sesion()
+
+
+@router.get("/estudios", response_model=RespuestaEstudios)
+async def listar_estudios():
+    """El selector de Estudio/Empresa que va en la barra superior.
+
+    Devuelve el catalogo guardado (el que baja el bot al loguearse: el selector
+    de la barra superior de Xubio cruzado con el catalogo de clientes) y cual es
+    el estudio elegido. Si todavia no hay catalogo pero la sesion esta
+    configurada, `aviso` dice que hay que renovarla una vez para bajarlo: no se
+    dispara el navegador desde un GET porque el login abre una ventana visible
+    y puede pedir un captcha.
+    """
+    return _armar_respuesta_estudios()
+
+
+@router.post("/estudios/sincronizar", response_model=RespuestaEstudios)
+async def sincronizar_estudios():
+    """Vuelve a bajar el catalogo de estudios con la sesion guardada.
+
+    Es el boton "Actualizar" del selector: corre el mismo bot de /login pero con
+    el email/contraseña ya guardados en el .env, asi que no hay que tipearlos de
+    nuevo. Abre el navegador visible (puede pedir un captcha o una verificacion
+    a mano), por eso es un POST explicito y no algo que se dispare solo al
+    abrir la pantalla.
+    """
+    try:
+        await asyncio.to_thread(
+            lambda: asyncio.run(
+                servicio_sesion.renovar_con_credenciales_guardadas(
+                    headless=settings.XUBIO_BOT_HEADLESS
+                )
+            )
+        )
+    except Exception as e:
+        logger.exception("No se pudo sincronizar el catalogo de estudios")
+        raise HTTPException(
+            status_code=502, detail=f"No se pudo sincronizar los estudios: {e}"
+        )
+    return _armar_respuesta_estudios()
+
+
+def _armar_respuesta_estudios() -> RespuestaEstudios:
+    """Arma lo que ve el selector: el catalogo guardado y el estudio elegido."""
+    configurada = bool(
+        (settings.XUBIO_WEB_TOKEN or "").strip()
+        or (settings.XUBIO_WEB_COOKIE or "").strip()
+    )
+    catalogo = estudios_xubio.cargar_catalogo()
+    crudos = catalogo["estudios"] + catalogo["solo_clientes"]
+    estudios = [Estudio.model_validate(e) for e in crudos]
+
+    actual = estudios_xubio.estudio_actual()
+    # `es_actual` en la lista: el frontend pinta el tilde sin comparar claves.
+    if actual is not None:
+        for estudio in estudios:
+            estudio.es_actual = estudio.clave == actual.clave
+
+    aviso = None
+    if not configurada:
+        aviso = (
+            "Sin sesion de Xubio: iniciá sesión para bajar los estudios de la "
+            "cuenta."
+        )
+    elif not estudios:
+        aviso = (
+            "La sesión está configurada pero todavía no hay estudios bajados: "
+            "renovala una vez para que el bot lea el selector de la cuenta."
+        )
+
+    return RespuestaEstudios(
+        exito=True,
+        configurada=configurada,
+        catalogo_cargado=bool(estudios),
+        empresa_en_sesion=catalogo.get("empresa_en_sesion"),
+        actual=actual,
+        estudios=estudios,
+        aviso=aviso,
+    )
+
+
+@router.put("/estudio", response_model=Estudio)
+async def elegir_estudio(solicitud: SolicitudEstudio):
+    """Elige el estudio activo de la app (el que filtra el Libro Mayor).
+
+    No cambia nada en Xubio: solo deja guardado que estudio se esta mirando.
+    El `organizacionId` del estudio es lo que viaja como
+    p_OrganizacionReportCode en el webreport del Libro Mayor.
+    """
+    try:
+        return estudios_xubio.seleccionar_estudio(solicitud.clave)
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"El estudio '{solicitud.clave}' no está en el catálogo. "
+                "Renová la sesión para volver a bajarlo."
+            ),
+        )
+
+
+@router.delete("/estudio")
+async def olvidar_estudio():
+    """Quita el estudio elegido: el selector vuelve a "elegí un estudio"."""
+    estudios_xubio.limpiar_estudio()
     return servicio_sesion.estado_sesion()
 
 

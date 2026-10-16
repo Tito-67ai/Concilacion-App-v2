@@ -33,6 +33,11 @@ htmlcov/
 Thumbs.db
 desktop.ini
 
+# Catalogo de estudios de Xubio: lo arma el bot al loguearse y lleva nombres,
+# CUIT y organizacionId de clientes reales. Nunca se versiona (repo publico);
+# se regenera solo con un login.
+.xubio_estudios.json
+
 # Extractos bancarios reales: nunca se versionan (el repo es publico y llevan
 # CBU, CUIT, cuenta y movimientos). Los PDF de prueba que usan los tests van en
 # backend/muestras/ y son sinteticos, generados por tests/generar_muestras.py.

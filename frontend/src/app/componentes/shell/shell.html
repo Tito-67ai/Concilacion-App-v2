@@ -1,18 +1,22 @@
 <div class="min-h-screen bg-[#f4f6f8]">
-  <!-- Barra superior: solo en pantallas chicas, para abrir el menú. -->
+  <!-- Barra superior. En escritorio lleva el selector de Estudio/Empresa a la
+       derecha; en pantallas chicas también el botón que abre el menú. -->
   <header
-    class="sticky top-0 z-30 flex items-center gap-3 border-b border-[color:var(--borde)] bg-white/90 px-4 py-3 backdrop-blur lg:hidden"
+    class="sticky top-0 z-30 border-b border-[color:var(--borde)] bg-white/90 backdrop-blur lg:pl-64"
   >
-    <button
-      type="button"
-      (click)="alternarMenu()"
-      aria-label="Abrir menú"
-      [attr.aria-expanded]="menuAbierto()"
-      class="flex h-9 w-9 items-center justify-center rounded-lg border border-[color:var(--borde)] text-slate-600 hover:bg-slate-50"
-    >
-      <i class="pi pi-bars"></i>
-    </button>
-    <span class="text-sm font-semibold text-slate-800">Conciliación Bancaria</span>
+    <div class="flex items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
+      <button
+        type="button"
+        (click)="alternarMenu()"
+        aria-label="Abrir menú"
+        [attr.aria-expanded]="menuAbierto()"
+        class="flex h-9 w-9 items-center justify-center rounded-lg border border-[color:var(--borde)] text-slate-600 hover:bg-slate-50 lg:hidden"
+      >
+        <i class="pi pi-bars"></i>
+      </button>
+      <span class="text-sm font-semibold text-slate-800 lg:hidden">Conciliación Bancaria</span>
+      <app-selector-estudio class="ml-auto" />
+    </div>
   </header>
 
   <!-- Fondo oscuro al abrir el menú en mobile. -->

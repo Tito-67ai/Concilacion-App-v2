@@ -2,6 +2,8 @@ import { CommonModule } from '@angular/common';
 import { Component, signal } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 
+import { SelectorEstudioComponent } from '../selector-estudio/selector-estudio';
+
 /** Un destino del menú lateral. */
 interface ItemNav {
   ruta: string;
@@ -12,7 +14,8 @@ interface ItemNav {
 }
 
 /**
- * Marco de la aplicación: barra lateral de navegación + área de contenido.
+ * Marco de la aplicación: barra lateral de navegación + barra superior con el
+ * selector de Estudio/Empresa + área de contenido.
  *
  * Reemplaza el viejo diseño "una sola pantalla a lo Xubio": ahora hay un lugar
  * fijo para moverse entre la conciliación y la importación de PDF, y las
@@ -24,7 +27,13 @@ interface ItemNav {
 @Component({
   selector: 'app-shell',
   standalone: true,
-  imports: [CommonModule, RouterOutlet, RouterLink, RouterLinkActive],
+  imports: [
+    CommonModule,
+    RouterOutlet,
+    RouterLink,
+    RouterLinkActive,
+    SelectorEstudioComponent,
+  ],
   templateUrl: './shell.html',
 })
 export class ShellComponent {

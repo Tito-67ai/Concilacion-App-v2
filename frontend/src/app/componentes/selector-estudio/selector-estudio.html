@@ -1,0 +1,101 @@
+<div class="relative">
+  <!-- Botón que muestra el estudio elegido. -->
+  <button
+    type="button"
+    (click)="alternar()"
+    [attr.aria-expanded]="abierto()"
+    aria-haspopup="listbox"
+    class="flex max-w-[18rem] items-center gap-2 rounded-lg border border-[color:var(--borde)] bg-white px-3 py-2 text-sm text-slate-700 shadow-sm hover:bg-slate-50"
+  >
+    <i class="pi pi-building text-slate-400"></i>
+    <span class="truncate">{{ etiqueta() }}</span>
+    <i class="pi pi-chevron-down ml-1 text-xs text-slate-400"></i>
+  </button>
+
+  <!-- Desplegable con el catálogo. -->
+  <div
+    *ngIf="abierto()"
+    role="listbox"
+    class="absolute right-0 z-40 mt-2 w-80 max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-[color:var(--borde)] bg-white shadow-lg"
+  >
+    <!-- Buscador -->
+    <div class="flex items-center gap-2 border-b border-[color:var(--borde)] px-3 py-2">
+      <i class="pi pi-search text-xs text-slate-400"></i>
+      <input
+        type="text"
+        [ngModel]="busqueda()"
+        (ngModelChange)="busqueda.set($event)"
+        placeholder="Buscar estudio"
+        class="w-full border-0 p-0 text-sm text-slate-700 outline-none placeholder:text-slate-400"
+      />
+    </div>
+
+    <!-- Aviso del backend (sin sesión / sin catálogo) -->
+    <p
+      *ngIf="estudios.aviso()"
+      class="border-b border-[color:var(--borde)] bg-amber-50 px-3 py-2 text-xs text-amber-800"
+    >
+      {{ estudios.aviso() }}
+    </p>
+    <p
+      *ngIf="estudios.error()"
+      class="border-b border-[color:var(--borde)] bg-red-50 px-3 py-2 text-xs text-red-700"
+    >
+      {{ estudios.error() }}
+    </p>
+
+    <!-- Lista -->
+    <ul class="max-h-72 overflow-y-auto py-1">
+      <li *ngFor="let estudio of filtrados()">
+        <button
+          type="button"
+          (click)="elegir(estudio)"
+          class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+        >
+          <i
+            class="pi pi-check text-xs text-emerald-600"
+            [class.invisible]="!estudio.es_actual"
+          ></i>
+          <span class="min-w-0 flex-1 truncate">{{ estudio.nombre }}</span>
+          <span
+            *ngIf="estudio.origen !== 'empresa'"
+            class="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-500"
+          >
+            cliente
+          </span>
+        </button>
+      </li>
+      <li
+        *ngIf="!estudios.cargando() && filtrados().length === 0"
+        class="px-3 py-4 text-center text-xs text-slate-400"
+      >
+        No hay estudios para mostrar.
+      </li>
+    </ul>
+
+    <!-- Pie: actualizar (corre el bot) y quitar la elección. -->
+    <div class="flex items-center justify-between border-t border-[color:var(--borde)] px-2 py-2">
+      <button
+        type="button"
+        (click)="actualizarDesdeXubio($event)"
+        [disabled]="estudios.sincronizando()"
+        title="Vuelve a bajar los estudios corriendo el bot de Xubio (abre el navegador)."
+        class="flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+      >
+        <i
+          class="pi text-xs"
+          [ngClass]="estudios.sincronizando() ? 'pi-spin pi-spinner' : 'pi-refresh'"
+        ></i>
+        {{ estudios.sincronizando() ? 'Actualizando…' : 'Actualizar desde Xubio' }}
+      </button>
+      <button
+        *ngIf="estudios.actual()"
+        type="button"
+        (click)="limpiar($event)"
+        class="rounded-lg px-2 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-50"
+      >
+        Quitar
+      </button>
+    </div>
+  </div>
+</div>

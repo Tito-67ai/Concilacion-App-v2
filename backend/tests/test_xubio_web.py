@@ -415,6 +415,63 @@ def test_libro_mayor_baja_por_la_sesion_web(monkeypatch):
     assert captura["authorization"] == "Bearer 309-token-de-prueba"
 
 
+def test_libro_mayor_usa_el_estudio_elegido_en_el_selector(monkeypatch, tmp_path):
+    """Con un estudio elegido, el mayor sale filtrado por ese estudio
+    (p_OrganizacionReportCode), no por empresa de la sesion."""
+    import app.api.rutas.xubio as rutas_xubio
+    from app.services import estudios_xubio
+
+    monkeypatch.setattr(config.settings, "XUBIO_WEB_COOKIE", "")
+    monkeypatch.setattr(config.settings, "XUBIO_WEB_TOKEN", "309-token-de-prueba")
+    monkeypatch.setattr(config.settings, "XUBIO_WEB_EMPRESA_REPORT_CODE", "29774")
+    # Catalogo temporal con una empresa que tiene organizacionId (5001) y elige
+    # ese estudio: el endpoint tiene que mandar 5001 en p_OrganizacionReportCode.
+    monkeypatch.setattr(estudios_xubio, "RUTA_CATALOGO", tmp_path / ".xubio_estudios.json")
+    monkeypatch.setattr(estudios_xubio, "RUTA_ENV", tmp_path / ".env")
+    # seleccionar_estudio muta `settings` (global): se registran los cuatro
+    # campos para que monkeypatch los restaure al terminar el test.
+    for campo in (
+        "XUBIO_ESTUDIO_CLAVE",
+        "XUBIO_ESTUDIO_NOMBRE",
+        "XUBIO_ESTUDIO_TENANT",
+        "XUBIO_ORGANIZACION_REPORT_CODE",
+    ):
+        monkeypatch.setattr(config.settings, campo, "")
+    estudios_xubio.guardar_catalogo(
+        [{"clave": "empresa:tnt_100001", "nombre": "ALFA S.A.", "tenant": "tnt_100001"}],
+        [
+            {
+                "id": 1,
+                "organizacionNombre": "ALFA S.A.",
+                "organizacionId": 5001,
+                "cuit": "30-11111111-1",
+            }
+        ],
+    )
+    estudios_xubio.seleccionar_estudio("empresa:tnt_100001")
+
+    captura: dict = {}
+    monkeypatch.setattr(
+        rutas_xubio, "cliente_web", XubioWebClient(transport=_transport_mayor(captura))
+    )
+
+    respuesta = cliente_test.get(
+        "/api/xubio/libro-mayor?desde=2026-07-01&hasta=2026-07-31"
+    )
+
+    assert respuesta.status_code == 200
+    assert 'name="p_OrganizacionReportCode" value="5001"' in captura["cuerpo"]
+
+    # Sin estudio elegido, el filtro vuelve a vacio (sale de la sesion).
+    estudios_xubio.limpiar_estudio()
+    captura2: dict = {}
+    monkeypatch.setattr(
+        rutas_xubio, "cliente_web", XubioWebClient(transport=_transport_mayor(captura2))
+    )
+    cliente_test.get("/api/xubio/libro-mayor?desde=2026-07-01&hasta=2026-07-31")
+    assert 'name="p_OrganizacionReportCode" value=""' in captura2["cuerpo"]
+
+
 def test_libro_mayor_parsea_la_grilla_a_movimientos(monkeypatch):
     """El frontend necesita los movimientos, no el JSON crudo: el endpoint
     parsea la grilla con el mismo traductor que la via archivo, y el crudo

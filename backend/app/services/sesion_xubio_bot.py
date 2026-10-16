@@ -92,12 +92,22 @@ class SesionCapturada:
     El token/cookie sirven para llamar a la web de Xubio; la empresa y la
     cuenta son los codigos con los que se pide el Libro Mayor, para que el
     reporte salga de la cuenta que se logueo y no de una fija.
+
+    `estudios` es la lista del selector de Empresa/Estudio de la barra
+    superior, que se lee en el mismo viaje que el login: un estudio contable
+    tiene decenas de empresas y el selector es la unica fuente que las lista
+    con su tenant. Se baja gratis porque el navegador ya esta parado en la
+    pagina donde esta pintada.
     """
 
     token: str | None = None
     cookie: str | None = None
     empresa_report_code: str | None = None
     cuenta_report_code: str | None = None
+    # La empresa que tenia abierta la sesion cuando entro el bot, y todas las
+    # que la cuenta habilita ({"clave", "nombre", "tenant"}).
+    empresa_en_sesion: str | None = None
+    estudios: list[dict] | None = None
 
 
 def primer_grupo(texto: str, patrones: tuple[str, ...]) -> str | None:
@@ -384,6 +394,32 @@ async def buscar_token_en_storage(page) -> str | None:
     return mejor
 
 
+async def leer_selector_estudios(page) -> tuple[str | None, list[dict]]:
+    """Lee el selector de Empresa/Estudio de la barra superior de la app NXV.
+
+    Devuelve (empresa_en_sesion, estudios). El selector no tiene endpoint: la
+    lista esta pintada en el HTML de /NXV/home dentro de #compania-lista, con
+    un <li class="licomp"> por estudio y el tenant en la query del <a>. El
+    parseo vive en estudios_xubio (puro, probado contra el marcado real).
+
+    Si la pagina no tiene el selector (la app quedo en otra pantalla, o cambio
+    el marcado) devuelve ([], None) sin romper el login: es un dato de mas, no
+    el motivo del viaje.
+    """
+    # Import perezoso y adentro de la funcion: evita un ciclo de importacion
+    # (estudios_xubio usa escribir_env de aca para persistir la eleccion).
+    from app.services.estudios_xubio import (
+        extraer_empresa_en_sesion,
+        extraer_estudios,
+    )
+
+    try:
+        html_pagina = await page.evaluate("() => document.documentElement.outerHTML")
+    except Exception:  # noqa: BLE001 - pestana cerrada en el medio
+        return None, []
+    return extraer_empresa_en_sesion(html_pagina), extraer_estudios(html_pagina)
+
+
 async def obtener_sesion_xubio(
     email: str,
     password: str,
@@ -602,7 +638,22 @@ async def obtener_sesion_xubio(
                     f"de las pestanas: {estado}"
                 )
 
-            print("7. Extrayendo sesion...")
+            # El selector de Empresa/Estudio esta pintado en la misma pagina
+            # donde acaba de caer el login: leerlo aca sale gratis y ahorra
+            # una segunda apertura de navegador despues.
+            print("7. Leyendo el selector de Empresa/Estudio...")
+            empresa_en_sesion: str | None = None
+            estudios: list[dict] = []
+            for pestana in context.pages:
+                if pestana.is_closed() or "xubio.com/NXV" not in (pestana.url or ""):
+                    continue
+                empresa_en_sesion, estudios = await leer_selector_estudios(pestana)
+                if estudios:
+                    break
+            print(f"   empresa de la sesion: {empresa_en_sesion or '(no se detecto)'}")
+            print(f"   estudios del selector: {len(estudios)}")
+
+            print("8. Extrayendo sesion...")
             cookies = await context.cookies()
             cookie_cruda = cookies_de_sesion(cookies)
             print("   url final:", [(p.url) for p in context.pages])
@@ -621,8 +672,10 @@ async def obtener_sesion_xubio(
                 cookie=cookie_cruda or None,
                 empresa_report_code=captura["empresa"],
                 cuenta_report_code=captura["cuenta"],
+                empresa_en_sesion=empresa_en_sesion,
+                estudios=estudios,
             )
 
         finally:
-            print("8. Cerrando el navegador...")
+            print("9. Cerrando el navegador...")
             await browser.close()

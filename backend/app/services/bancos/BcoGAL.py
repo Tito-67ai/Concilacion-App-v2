@@ -4,6 +4,34 @@ import re
 
 from app.services.Tools import es_numero_bancario, limpiar_numero, guardar_excel
 
+
+def _debe_haber(valor_movimiento, es_office_banking, linea_raw=""):
+    """
+    Decide DEBE/HABER de un movimiento de Galicia.
+
+    El contrato del proyecto es DEBE = plata que SALE y HABER = plata que ENTRA
+    (ver test_la_convencion_de_debe_y_haber_no_se_puede_invertir). En el reporte
+    tradicional el importe ya trae el signo: positivo es un credito (entra),
+    negativo un debito (sale). En Office Banking el banco imprime el signo
+    suelto en la linea: "+" entra y "-" sale.
+
+    Devolvia el signo al reves desde que se importo el parser (positivo -> DEBE),
+    asi que un extracto real de Galicia descuadraba 885 de 886 filas: el saldo
+    arrancaba derivado desde la primera linea.
+    """
+    if es_office_banking:
+        if "+" in linea_raw:
+            return 0.0, abs(valor_movimiento)
+        if "-" in linea_raw:
+            return abs(valor_movimiento), 0.0
+        # Sin signo explicito en la linea: decide el propio importe.
+        return (0.0, valor_movimiento) if valor_movimiento >= 0 else (abs(valor_movimiento), 0.0)
+
+    if valor_movimiento >= 0:
+        return 0.0, valor_movimiento
+    return abs(valor_movimiento), 0.0
+
+
 def extraer_galicia(pdf_path, excel_path, log_callback):
     """
     Motor Galicia V6 (Híbrido - Detecta Office Banking):
@@ -92,43 +120,10 @@ def extraer_galicia(pdf_path, excel_path, log_callback):
                         valor_saldo = limpiar_numero(str_saldo) 
 
                         # --- LÓGICA CORE: DECISIÓN DEBE vs HABER ---
-                        
-                        debe = 0.0
-                        haber = 0.0
-
-                        if es_office_banking:
-                            # LÓGICA OFFICE BANKING: Buscamos signos explícitos en la línea
-                            # El PDF suele separar los signos: "+ $ 100" -> ['+', '$', '100']
-                            # Buscamos si hay un "+" o un "-" en los tokens cercanos al movimiento
-                            
-                            # Convertimos toda la línea a string para buscar el signo fácil
-                            linea_raw = " ".join(partes)
-                            
-                            # Si tiene signo MENOS cerca del importe -> DEBE
-                            # Si tiene signo MÁS cerca del importe -> HABER
-                            
-                            # Verificamos si el token del movimiento tiene signo o si hay uno suelto en la línea
-                            if "+" in linea_raw: 
-                                haber = 0.0
-                                debe = abs(valor_movimiento)
-                            elif "-" in linea_raw:
-                                debe = 0.0
-                                haber = abs(valor_movimiento)
-                            else:
-                                # Si no encuentra signo explícito, usa fallback estándar
-                                if valor_movimiento >= 0: haber = valor_movimiento
-                                else: debe = abs(valor_movimiento)
-
-                        else:
-                            # LÓGICA TRADICIONAL:
-                            # Positivo = Haber (Entrada)
-                            # Negativo = Debe (Salida)
-                            if valor_movimiento >= 0:
-                                haber = 0.0
-                                debe = valor_movimiento
-                            else:
-                                debe = 0.0
-                                haber = abs(valor_movimiento)
+                        linea_raw = " ".join(partes)
+                        debe, haber = _debe_haber(
+                            valor_movimiento, es_office_banking, linea_raw
+                        )
 
                         transaccion_actual = {
                             "FECHA": fecha,

@@ -28,6 +28,15 @@ CARPETA_TEMPORALES = os.path.join(tempfile.gettempdir(), "conciliacion_pdfs")
 # para no meter un import en el modulo que central importa.
 MOTORES_GENERICOS = {"GENERICO": extraer_generico}
 
+# Santander publica el mismo banco en dos formatos distintos segun el portal (el
+# "reportes" mensual, compartido con ICBC, y el "Mi resumen de cuenta" clasico).
+# Cada uno tiene su motor. Si el usuario elige uno y el PDF es del otro, se
+# prueba el motor hermano antes de caer al generico, que acierta menos.
+MOTORES_ALTERNATIVOS = {
+    "SANT": ("RIO",),
+    "RIO": ("SANT",),
+}
+
 # Ultimo recurso cuando el motor generico no puede explicar el fallo.
 _MOTOR_GENERICO_FALLIDO = (
     "El motor generico no pudo leer este PDF. Probalo con el motor de tu "
@@ -118,6 +127,23 @@ def _leer_pdf(banco_id, ruta_pdf):
 
     if movimientos:
         return movimientos, banco_id
+
+    # Antes del generico, probar los motores hermanos (Santander se imprime en
+    # dos formatos y cada uno tiene su parser).
+    for alterno in MOTORES_ALTERNATIVOS.get(banco_id, ()):
+        try:
+            movimientos = procesar_archivo(banco_id=alterno, ruta_pdf=ruta_pdf)
+        except ErrorDeExtraccion as e:
+            logger.info(
+                "El motor alternativo %s tampoco pudo leer el PDF de %s: %s",
+                alterno,
+                banco_id,
+                e,
+            )
+            continue
+        if movimientos:
+            logger.info("El motor %s leyo el PDF de %s", alterno, banco_id)
+            return movimientos, alterno
 
     logger.warning(
         "El parser de %s termino sin movimientos, se prueba el motor generico", banco_id

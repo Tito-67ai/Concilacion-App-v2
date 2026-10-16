@@ -262,6 +262,36 @@ def test_el_parser_del_banco_no_borra_el_pdf_que_recibe(tmp_path):
 
 
 # --------------------------------------------------------------------------
+# Los dos formatos de Santander: el "reportes" del portal y el resumen clasico
+# --------------------------------------------------------------------------
+
+
+def test_el_motor_hermano_lee_el_pdf_cuando_el_elegido_no_puede():
+    """
+    Santander publica el mismo banco en dos formatos con dos motores distintos
+    (SANT para el "reportes" del portal, RIO para el resumen clasico). Si el
+    usuario elige el que no corresponde, se prueba el hermano antes de caer al
+    generico, que acierta menos.
+    """
+    from app.api.rutas.extractos import _leer_pdf
+
+    # santander.pdf es el formato "reportes", que RIO (el clasico) no lee.
+    movimientos, motor = _leer_pdf("RIO", RUTA_PDF)
+
+    assert motor == "SANT"
+    assert len(movimientos) == CANTIDAD_ESPERADA
+
+
+def test_elegir_el_motor_correcto_no_cambia_nada():
+    from app.api.rutas.extractos import _leer_pdf
+
+    movimientos, motor = _leer_pdf("SANT", RUTA_PDF)
+
+    assert motor == "SANT"
+    assert len(movimientos) == CANTIDAD_ESPERADA
+
+
+# --------------------------------------------------------------------------
 # PDF escaneado
 # --------------------------------------------------------------------------
 

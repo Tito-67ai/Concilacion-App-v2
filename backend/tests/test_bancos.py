@@ -546,6 +546,35 @@ def test_la_convencion_de_debe_y_haber_no_se_puede_invertir():
 
 
 # --------------------------------------------------------------------------
+# Galicia: el signo del importe
+# --------------------------------------------------------------------------
+
+
+def test_galicia_tradicional_positivo_entra_y_negativo_sale():
+    """
+    Un extracto real de Galicia ("Resumen de Cuenta Corriente") trae el importe
+    ya firmado: positivo es un credito y negativo un debito. El parser hacia lo
+    contrario, asi que el saldo derivado arrancaba mal y 885 de 886 filas
+    descuadraban contra el saldo impreso por el banco.
+    """
+    # Credito: entra plata -> HABER
+    assert BcoGAL._debe_haber(70_450.38, es_office_banking=False) == (0.0, 70_450.38)
+    # Debito: sale plata -> DEBE
+    assert BcoGAL._debe_haber(-51_999.00, es_office_banking=False) == (51_999.00, 0.0)
+
+
+def test_galicia_office_banking_usa_el_signo_suelto():
+    """En Office Banking el signo viene separado: "+" entra y "-" sale."""
+    assert BcoGAL._debe_haber(1_000.0, es_office_banking=True, linea_raw="+ $ 1.000,00") == (0.0, 1_000.0)
+    assert BcoGAL._debe_haber(1_000.0, es_office_banking=True, linea_raw="- $ 1.000,00") == (1_000.0, 0.0)
+
+
+def test_galicia_office_banking_sin_signo_usa_el_importe():
+    assert BcoGAL._debe_haber(500.0, es_office_banking=True, linea_raw="500,00") == (0.0, 500.0)
+    assert BcoGAL._debe_haber(-500.0, es_office_banking=True, linea_raw="500,00") == (500.0, 0.0)
+
+
+# --------------------------------------------------------------------------
 # Credenciales de Xubio
 # --------------------------------------------------------------------------
 

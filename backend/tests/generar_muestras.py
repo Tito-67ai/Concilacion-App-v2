@@ -30,6 +30,7 @@ MUESTRAS = Path(__file__).resolve().parent.parent / "muestras"
 FIXTURES = [
     ("tests.datos_santander", "santander.pdf"),
     ("tests.datos_icbc", "icbc.pdf"),
+    ("tests.datos_bbva", "bbva.pdf"),
 ]
 
 
@@ -51,8 +52,8 @@ def construir(destino: Path, paginas):
 
 
 def _lineas_de_movimiento(linea):
-    """Una linea de movimiento arranca con dd-mm y trae un importe con signo."""
-    return len(linea) > 5 and linea[2] == "-" and linea[5] == " "
+    """Una linea de movimiento arranca con dd-mm o dd/mm y trae un importe."""
+    return len(linea) > 5 and linea[2] in "-/" and linea[5] == " "
 
 
 if __name__ == "__main__":

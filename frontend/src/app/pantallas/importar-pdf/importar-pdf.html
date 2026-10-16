@@ -1,30 +1,34 @@
-<div class="min-h-screen bg-[#f4f6f8] p-6">
-  <div class="mx-auto max-w-5xl animate-aparecer-sube">
+<div class="relative">
+  <div class="mx-auto max-w-4xl animate-aparecer-sube">
 
     <!-- Volver -->
     <button
       type="button"
       (click)="volver()"
-      class="group mb-6 inline-flex items-center gap-2 rounded px-2 py-1 text-sm text-[#004e82] transition-colors duration-200 hover:bg-white"
+      class="group mb-6 inline-flex items-center gap-2 rounded-lg px-2 py-1 text-sm text-[#004e82] transition-colors duration-200 hover:bg-[#eef4fa]"
     >
       <i class="pi pi-arrow-left text-xs transition-transform duration-200 group-hover:-translate-x-0.5"></i>
       Volver
     </button>
 
     <!-- Encabezado -->
-    <div class="mb-6">
-      <div class="flex flex-wrap items-center gap-3">
-        <h1 class="text-xl font-normal text-gray-700">Importación vía PDF</h1>
-        <span class="rounded-full bg-[#004e82] px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
-          Nuevo
-        </span>
+    <header class="mb-6 flex items-start gap-3">
+      <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#eef4fa] text-[#004e82]">
+        <i class="pi pi-file-pdf text-lg"></i>
+      </span>
+      <div class="min-w-0">
+        <div class="flex flex-wrap items-center gap-3">
+          <h1 class="text-xl font-semibold text-slate-800">Importación vía PDF</h1>
+          <span class="rounded-full bg-[#004e82] px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+            Nuevo
+          </span>
+        </div>
+        <p class="mt-1 text-sm text-slate-500">
+          Revisá la previsualización antes de confirmar: los movimientos se van a guardar en la cuenta
+          contable que elijas.
+        </p>
       </div>
-
-      <p class="mt-2 text-sm italic text-gray-500">
-        Revisá la previsualización antes de confirmar: los movimientos se van a guardar en la cuenta
-        contable que elijas.
-      </p>
-    </div>
+    </header>
 
     <!-- El backend no esta disponible: no tiene sentido mostrar el formulario -->
     <div *ngIf="errorBancos()" class="mb-6 rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -36,7 +40,7 @@
       [formGroup]="formulario"
       (ngSubmit)="previsualizar()"
       *ngIf="!errorBancos()"
-      class="rounded border border-gray-200 bg-white p-6 shadow-sm"
+      class="tarjeta p-6"
     >
       <div class="grid grid-cols-1 gap-6 md:grid-cols-2 md:gap-8">
 
@@ -193,7 +197,7 @@
           <button
             type="button"
             (click)="volver()"
-            class="rounded border border-transparent bg-[#e2e6e9] px-4 py-1.5 text-sm text-[#4a5568] transition-all duration-200 hover:border-gray-400 hover:bg-[#d1d5db]"
+            class="btn btn-secundario"
           >
             Cancelar
           </button>
@@ -201,12 +205,7 @@
           <button
             type="submit"
             [disabled]="!habilitado"
-            [ngClass]="
-              habilitado
-                ? 'bg-[#004e82] text-white hover:bg-[#00395e]'
-                : 'cursor-not-allowed bg-[#d5dbe0] text-[#8b95a1]'
-            "
-            class="rounded px-6 py-1.5 text-sm transition-all duration-200"
+            class="btn btn-primario px-6"
           >
             Previsualizar importación
           </button>

@@ -22,6 +22,7 @@ import {
   PartidaPendiente,
   ReporteMarkdown,
   RespuestaAfiliados,
+  RespuestaAsientos,
   RespuestaBancos,
   RespuestaConciliacionAvanzada,
   RespuestaCruce,
@@ -121,6 +122,7 @@ export class ConciliacionComponent implements OnInit {
     // anteriores. Se borra en el origen (y no solo al reconcialiar) para que no
     // quede un cuadro de control viejo colgado de datos que ya no estan.
     this._analisisAvanzado = null;
+    this._asientosAjuste = null;
     this.notificar();
   }
 
@@ -218,6 +220,22 @@ export class ConciliacionComponent implements OnInit {
   private _analizandoAvanzado: boolean = false;
   get analizandoAvanzado(): boolean { return this._analizandoAvanzado; }
   set analizandoAvanzado(valor: boolean) { this._analizandoAvanzado = valor; this.notificar(); }
+
+  // Asientos de ajuste: el backend convierte cada partida sin coincidencia en
+  // un asiento de partida doble (con contracuenta). Es la vista previa de la
+  // hoja "Asientos de Ajuste" que viaja en el Excel; el cálculo vive en el
+  // backend para que la pantalla y el archivo no puedan discrepar.
+  private _asientosAjuste: RespuestaAsientos | null = null;
+  get asientosAjuste(): RespuestaAsientos | null { return this._asientosAjuste; }
+  set asientosAjuste(valor: RespuestaAsientos | null) { this._asientosAjuste = valor; this.notificar(); }
+
+  private _cargandoAsientos: boolean = false;
+  get cargandoAsientos(): boolean { return this._cargandoAsientos; }
+  set cargandoAsientos(valor: boolean) { this._cargandoAsientos = valor; this.notificar(); }
+
+  private _errorAsientos: string = '';
+  get errorAsientos(): string { return this._errorAsientos; }
+  set errorAsientos(valor: string) { this._errorAsientos = valor; this.notificar(); }
 
   // ------------------------------------------------------------------
   // Afiliados de Xubio (web) en el inicio del panel derecho
@@ -329,6 +347,7 @@ export class ConciliacionComponent implements OnInit {
     // Mismo criterio que con el extracto: el analisis avanzado es de las filas
     // anteriores y no sobrevive a un mayor nuevo.
     this._analisisAvanzado = null;
+    this._asientosAjuste = null;
     this.notificar();
   }
   // El nombre del archivo (o del reporte) cargado, para que se vea cual quedo
@@ -1678,6 +1697,7 @@ export class ConciliacionComponent implements OnInit {
     // Un cruce nuevo deja el analisis avanzado viejo: sus totales son de las
     // bandejas anteriores y mostrarlos mezclados confunde.
     this.analisisAvanzado = null;
+    this.asientosAjuste = null;
 
     // Los dos lados van en el cuerpo: el mayor viene del archivo que cargo el
     // usuario, no de la API de Xubio, que esta reservada a planes superiores.
@@ -1880,6 +1900,66 @@ export class ConciliacionComponent implements OnInit {
             error,
             'No se pudo hacer el análisis avanzado. Revisá que FastAPI esté ' +
             'corriendo en el puerto 8000.'
+          );
+        },
+      });
+  }
+
+  // ------------------------------------------------------------------
+  // Asientos de ajuste (partida doble de lo que quedó sin coincidencia)
+  // ------------------------------------------------------------------
+
+  /** Los asientos solo tienen sentido cuando hay algo sin conciliar. */
+  get puedeVerAsientos(): boolean {
+    return (
+      !this.cargandoAsientos &&
+      (this.pendientesBanco.length > 0 || this.pendientesXubio.length > 0)
+    );
+  }
+
+  get motivoAsientosBloqueado(): string {
+    if (this.pendientesBanco.length === 0 && this.pendientesXubio.length === 0) {
+      return 'No hay partidas sin coincidencia: no hay asientos de ajuste que armar.';
+    }
+    return '';
+  }
+
+  /**
+   * Pide al backend los asientos de ajuste de las partidas sin coincidencia.
+   *
+   * Es el mismo cálculo que arma la hoja "Asientos de Ajuste" del Excel: cada
+   * partida sin par se convierte en un asiento de partida doble con su
+   * contracuenta. Se pide a mano para no encadenar otra llamada al cruce.
+   */
+  verAsientosDeAjuste() {
+    if (this.cargandoAsientos) return;
+
+    if (this.pendientesBanco.length === 0 && this.pendientesXubio.length === 0) {
+      this.errorAsientos = this.motivoAsientosBloqueado;
+      return;
+    }
+
+    this.cargandoAsientos = true;
+    this.errorAsientos = '';
+
+    this.http
+      .post<RespuestaAsientos>(
+        `${API}/exportar/asientos`,
+        this.payloadDeExportacion()
+      )
+      .subscribe({
+        next: (respuesta) => {
+          this.asientosAjuste = respuesta;
+          this.cargandoAsientos = false;
+        },
+        error: (error: HttpErrorResponse) => {
+          console.error('Error armando los asientos de ajuste', error);
+          this.asientosAjuste = null;
+          this.cargandoAsientos = false;
+          this.errorAsientos = this.mensajeDeError(
+            error,
+            'No se pudieron armar los asientos de ajuste. Revisá que FastAPI ' +
+            'esté corriendo en el puerto 8000.'
           );
         },
       });

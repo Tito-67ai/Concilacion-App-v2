@@ -3,8 +3,21 @@
 @tailwind utilities;
 
 /* ---------------------------------------------------------------------------
-   Base: mismo fondo y tipografía que ya usa la pantalla de conciliación
+   Tokens del rediseño: paleta sobria y clara, un solo acento (el azul de la
+   marca). Se exponen como variables para no repetir hexadecimales y poder
+   ajustar el tema en un solo lugar.
 --------------------------------------------------------------------------- */
+:root {
+  --marca: #004e82;
+  --marca-oscura: #003f69;
+  --marca-suave: #eef4fa;
+  --fondo: #f4f6f8;
+  --superficie: #ffffff;
+  --borde: #e5e8ec;
+  --texto: #1f2a37;
+  --texto-suave: #64748b;
+}
+
 @layer base {
   body {
     @apply bg-[#f4f6f8] text-gray-700 antialiased;
@@ -14,6 +27,60 @@
   :where(a, button, input, select, textarea, [tabindex]):focus-visible {
     outline: 2px solid rgba(0, 78, 130, 0.45);
     outline-offset: 2px;
+  }
+
+  h1,
+  h2,
+  h3 {
+    @apply text-[color:var(--texto)];
+  }
+}
+
+@layer components {
+  /* --- Navegación lateral ------------------------------------------------- */
+  .nav-link {
+    @apply flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition-colors duration-150
+           hover:bg-slate-100 hover:text-slate-900;
+  }
+  .nav-link i {
+    @apply text-base text-slate-400 transition-colors;
+  }
+  .nav-link.nav-activo {
+    @apply bg-[color:var(--marca-suave)] text-[color:var(--marca)];
+  }
+  .nav-link.nav-activo i {
+    @apply text-[color:var(--marca)];
+  }
+
+  /* --- Superficies -------------------------------------------------------- */
+  .tarjeta {
+    @apply rounded-xl border border-[color:var(--borde)] bg-white shadow-sm;
+  }
+  .tarjeta-suave {
+    @apply rounded-xl border border-[color:var(--borde)] bg-slate-50;
+  }
+
+  /* --- Botones ------------------------------------------------------------ */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors
+           duration-150 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primario {
+    @apply bg-[color:var(--marca)] text-white hover:bg-[color:var(--marca-oscura)];
+  }
+  .btn-secundario {
+    @apply border border-[color:var(--borde)] bg-white text-slate-700 hover:bg-slate-50;
+  }
+  .btn-fantasma {
+    @apply text-[color:var(--marca)] hover:bg-[color:var(--marca-suave)];
+  }
+
+  /* --- Etiquetas ---------------------------------------------------------- */
+  .etiqueta {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-semibold;
+  }
+  .etiqueta-marca {
+    @apply bg-[color:var(--marca-suave)] text-[color:var(--marca)];
   }
 }
 

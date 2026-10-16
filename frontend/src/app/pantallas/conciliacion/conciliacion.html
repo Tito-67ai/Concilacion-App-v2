@@ -1,34 +1,45 @@
-<div class="min-h-screen bg-[#f9fafb] p-6 relative">
-  <div class="mx-auto max-w-6xl animate-aparecer-sube">
+<div class="relative">
+  <div class="animate-aparecer-sube">
 
-    <!-- Barra superior: sesion de Xubio y ayuda. La sesion aparece solo
-         mientras hay sesion configurada: el 503 del panel ya muestra el login
-         cuando falta, y aca no hay nada que cerrar. -->
-    <header
-      class="mb-6 flex flex-col gap-3 rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-sm sm:flex-row sm:items-center sm:justify-between"
-    >
-      <h1 class="min-w-0 text-base font-medium text-gray-800">
-        Conciliación Bancaria Automática
-      </h1>
+    <!-- Encabezado de la pantalla: titulo + sesion de Xubio y ayuda. La sesion
+         aparece solo mientras hay sesion configurada: el 503 del panel ya
+         muestra el login cuando falta, y aca no hay nada que cerrar. -->
+    <header class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div class="flex min-w-0 items-start gap-3">
+        <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#eef4fa] text-[#004e82]">
+          <i class="pi pi-sync text-lg"></i>
+        </span>
+        <div class="min-w-0">
+          <h1 class="truncate text-xl font-semibold text-slate-800">
+            Conciliación Bancaria Automática
+          </h1>
+          <p class="mt-0.5 text-sm text-slate-500">
+            Importá el extracto, cruzálo con el Libro Mayor y exportá el papel de trabajo FO 02-03.
+          </p>
+        </div>
+      </div>
 
       <div class="flex items-center gap-2">
         <ng-container *ngIf="sesionXubioActiva">
           <button (click)="salirDeXubio()" [disabled]="sesionXubioAccion"
                   title="Olvida el token/cookie de Xubio: el panel vuelve al login para renovar"
-                  class="flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-xs text-gray-600 transition-colors duration-200 hover:border-[#004e82]/40 hover:text-[#004e82] disabled:cursor-not-allowed disabled:opacity-50">
+                  class="btn btn-secundario px-2.5 py-1 text-xs">
             <i *ngIf="sesionXubioAccion === 'salir'" class="pi pi-spin pi-spinner text-[10px]"></i>
             <i *ngIf="sesionXubioAccion !== 'salir'" class="pi pi-sign-out text-[10px]"></i>
             Salir de Xubio
           </button>
           <button (click)="cerrarSesionXubio()" [disabled]="sesionXubioAccion"
                   title="Cierra la sesión de Xubio y borra el email/contraseña guardados en backend/.env"
-                  class="flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-2.5 py-1 text-xs text-red-600 transition-colors duration-200 hover:border-red-400 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50">
+                  class="btn border border-red-200 bg-white px-2.5 py-1 text-xs text-red-600 hover:border-red-400 hover:text-red-700">
             <i *ngIf="sesionXubioAccion === 'cerrar'" class="pi pi-spin pi-spinner text-[10px]"></i>
             <i *ngIf="sesionXubioAccion !== 'cerrar'" class="pi pi-times text-[10px]"></i>
             Cerrar sesión
           </button>
         </ng-container>
-        <a [href]="enlaceAyuda" class="rounded-lg px-2 py-1 text-sm text-[#004e82] underline-offset-4 transition-colors duration-200 hover:bg-[#eaf2f7] hover:underline">Ver ayuda</a>
+        <a [href]="enlaceAyuda" class="btn btn-secundario">
+          <i class="pi pi-question-circle text-xs"></i>
+          Ver ayuda
+        </a>
       </div>
     </header>
 
@@ -39,72 +50,78 @@
     </div>
 
     <!-- 1. Tarjeta de Filtros -->
-    <section class="mb-6 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-      <div class="flex justify-between items-center mb-4">
-        <h2 class="text-sm font-semibold text-gray-800">Filtros</h2>
-        <i class="pi pi-chevron-up text-gray-400 text-xs"></i>
+    <section class="tarjeta mb-6 p-5">
+      <div class="mb-4 flex items-center gap-2">
+        <i class="pi pi-filter text-xs text-[#004e82]"></i>
+        <h2 class="text-sm font-semibold text-slate-700">Filtros del período</h2>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-6 items-end">
+      <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
 
         <!-- Banco del extracto -->
-        <div class="flex flex-col relative">
-          <label class="text-[11px] font-medium text-gray-500 absolute -top-2 left-2 bg-white px-1">Banco del extracto<span class="text-red-500">*</span></label>
-          <select [(ngModel)]="bancoSeleccionado"
-                  class="h-10 appearance-none rounded-lg border border-gray-300 bg-white px-3 pr-8 text-sm text-gray-700 shadow-sm outline-none transition-colors duration-200 focus:border-[#004e82]">
-            <option *ngFor="let banco of bancos" [value]="banco">{{ banco }}</option>
-          </select>
-          <i class="pi pi-chevron-down absolute right-3 top-3.5 text-xs text-gray-400 pointer-events-none"></i>
+        <div>
+          <label class="mb-1.5 block text-xs font-medium text-slate-500">
+            Banco del extracto<span class="text-red-500">*</span>
+          </label>
+          <div class="relative">
+            <select [(ngModel)]="bancoSeleccionado"
+                    class="h-10 w-full appearance-none rounded-lg border border-[color:var(--borde)] bg-white px-3 pr-8 text-sm text-slate-700 shadow-sm outline-none transition-colors duration-200 focus:border-[#004e82]">
+              <option *ngFor="let banco of bancos" [value]="banco">{{ banco }}</option>
+            </select>
+            <i class="pi pi-chevron-down pointer-events-none absolute right-3 top-3.5 text-xs text-slate-400"></i>
+          </div>
         </div>
 
-        <!-- Fechas agrupadas. Con ngModel y no con value fijo: antes el HTML
-             traia value="2026-09-30" en los dos y nada leia lo que el usuario
+        <!-- Fechas. Con ngModel y no con value fijo: antes el HTML traia
+             value="2026-09-30" en los dos y nada leia lo que el usuario
              escribia, asi que la pantalla siempre decia septiembre de 2026.
              Ademas el rango es de donde sale el periodo del papel de trabajo
              FO 02-03. -->
-        <div class="flex gap-4">
-          <div class="flex flex-col relative w-1/2">
-            <label class="text-[11px] font-medium text-gray-500 absolute -top-2 left-2 bg-white px-1">Fecha desde<span class="text-red-500">*</span></label>
-            <input type="date" name="fechaDesde" [(ngModel)]="fechaDesde"
-                   class="h-10 rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-700 shadow-sm outline-none transition-colors duration-200 focus:border-[#004e82]">
-          </div>
-          <div class="flex flex-col relative w-1/2">
-            <label class="text-[11px] font-medium text-gray-500 absolute -top-2 left-2 bg-white px-1">Fecha hasta<span class="text-red-500">*</span></label>
-            <input type="date" name="fechaHasta" [(ngModel)]="fechaHasta"
-                   class="h-10 rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-700 shadow-sm outline-none transition-colors duration-200 focus:border-[#004e82]">
-          </div>
+        <div>
+          <label class="mb-1.5 block text-xs font-medium text-slate-500">
+            Fecha desde<span class="text-red-500">*</span>
+          </label>
+          <input type="date" name="fechaDesde" [(ngModel)]="fechaDesde"
+                 class="h-10 w-full rounded-lg border border-[color:var(--borde)] bg-white px-3 text-sm text-slate-700 shadow-sm outline-none transition-colors duration-200 focus:border-[#004e82]">
+        </div>
+        <div>
+          <label class="mb-1.5 block text-xs font-medium text-slate-500">
+            Fecha hasta<span class="text-red-500">*</span>
+          </label>
+          <input type="date" name="fechaHasta" [(ngModel)]="fechaHasta"
+                 class="h-10 w-full rounded-lg border border-[color:var(--borde)] bg-white px-3 text-sm text-slate-700 shadow-sm outline-none transition-colors duration-200 focus:border-[#004e82]">
         </div>
 
       </div>
     </section>
 
     <!-- 2. Pestañas (Tabs) Dinámicas -->
-    <div class="flex border-b border-gray-200 mb-5 gap-6">
+    <div class="mb-5 flex gap-2 overflow-x-auto">
       <button (click)="cambiarTab('a_conciliar')"
-              [ngClass]="tabActiva === 'a_conciliar' ? 'text-[#004e82] border-[#004e82] font-semibold' : 'text-gray-500 border-transparent hover:text-gray-700'"
-              class="pb-2.5 text-sm border-b-2 transition-all">
+              [ngClass]="tabActiva === 'a_conciliar' ? 'bg-white text-[#004e82] shadow-sm ring-1 ring-[#004e82]/15 font-semibold' : 'text-slate-500 hover:bg-white/60 hover:text-slate-700'"
+              class="shrink-0 rounded-lg px-3.5 py-2 text-sm transition-all">
         Movimientos a conciliar ({{ totalConciliables }})
       </button>
       <button (click)="cambiarTab('conciliados')"
-              [ngClass]="tabActiva === 'conciliados' ? 'text-[#004e82] border-[#004e82] font-semibold' : 'text-gray-500 border-transparent hover:text-gray-700'"
-              class="pb-2.5 text-sm border-b-2 transition-all">
+              [ngClass]="tabActiva === 'conciliados' ? 'bg-white text-[#004e82] shadow-sm ring-1 ring-[#004e82]/15 font-semibold' : 'text-slate-500 hover:bg-white/60 hover:text-slate-700'"
+              class="shrink-0 rounded-lg px-3.5 py-2 text-sm transition-all">
         Movimientos conciliados ({{ conciliados.length }})
       </button>
       <!-- Cuantos de los conciliados los armo una persona y no el cruce
            automatico. Con solo el total no se distingue un par de 200 de
            diferencia de uno exacto. -->
       <button *ngIf="paresManuales.length > 0" (click)="cambiarTab('conciliados')"
-              class="pb-2.5 text-sm border-b-2 border-transparent text-amber-700 hover:text-amber-800 transition-all flex items-center gap-1">
+              class="flex shrink-0 items-center gap-1 rounded-lg px-3.5 py-2 text-sm text-amber-700 transition-all hover:bg-amber-50">
         <i class="pi pi-user text-[10px]"></i> A mano ({{ paresManuales.length }})
       </button>
     </div>
 
     <!-- 3. Botonera de Acciones -->
-    <div class="flex flex-wrap gap-2 mb-6">
+    <div class="mb-6 flex flex-wrap items-center gap-2">
       <!-- Deshacer el ultimo par manual. Solo aparece cuando hay algo que
            deshacer: un boton siempre deshabilitado es ruido. -->
       <button *ngIf="ultimoPareoManual" (click)="deshacerPareoManual()"
-              class="flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3.5 py-2 text-sm text-gray-700 shadow-sm transition-colors duration-200 hover:border-gray-400 hover:bg-gray-50">
+              class="btn btn-secundario">
         <i class="pi pi-undo text-xs"></i> Deshacer par
       </button>
 
@@ -115,7 +132,7 @@
       <button (click)="archivoMayor.click()"
               [disabled]="cargando"
               [title]="movimientosMayor.length ? nombreMayor : 'Cargar el Libro Mayor exportado a Excel o CSV'"
-              class="flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3.5 py-2 text-sm text-gray-700 shadow-sm transition-colors duration-200 hover:border-gray-400 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-gray-300 disabled:hover:bg-white">
+              class="btn btn-secundario">
         <i class="pi" [ngClass]="movimientosMayor.length ? 'pi-file-excel text-green-700' : 'pi-file'"></i>
         {{ etiquetaMayor }}
       </button>
@@ -134,7 +151,7 @@
               [title]="puedeTraerMayorDeXubio
                 ? 'Traer el Libro Mayor del período directo de Xubio'
                 : motivoTraerMayorBloqueado"
-              class="flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3.5 py-2 text-sm text-gray-700 shadow-sm transition-colors duration-200 hover:border-gray-400 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-gray-300 disabled:hover:bg-white">
+              class="btn btn-secundario">
         <i *ngIf="cargandoMayorXubio" class="pi pi-spin pi-spinner text-xs"></i>
         <i *ngIf="!cargandoMayorXubio" class="pi pi-cloud-download text-xs"></i>
         {{ cargandoMayorXubio ? 'Trayendo…' : 'Traer de Xubio' }}
@@ -147,15 +164,12 @@
       <button (click)="ejecutarAutoconciliacion()"
               [disabled]="!puedeAutoconciliar"
               [title]="motivoAutoconciliarBloqueado || 'Cruzar el extracto contra el Libro Mayor'"
-              class="flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition-colors duration-200"
-              [ngClass]="puedeAutoconciliar
-                ? 'bg-[#004e82] text-white shadow-sm hover:bg-[#003a61]'
-                : 'cursor-not-allowed bg-gray-200 text-gray-400'">
+              class="btn btn-primario">
         <i *ngIf="cargando" class="pi pi-spin pi-spinner text-xs"></i>
         {{ cargando ? 'Conciliando…' : 'Autoconciliar 🪄' }}
       </button>
       <span *ngIf="motivoAutoconciliarBloqueado"
-             class="flex items-center gap-1 text-[11px] text-gray-500 self-center">
+             class="flex items-center gap-1 self-center text-[11px] text-slate-500">
         <i class="pi pi-info-circle text-[10px]"></i>
         {{ motivoAutoconciliarBloqueado }}
       </span>
@@ -166,7 +180,7 @@
       <button (click)="ejecutarConciliacionAvanzada()"
               [disabled]="!puedeAnalizarAvanzado"
               [title]="motivoAnalizarBloqueado || 'Clasificar lo que quedó sin coincidencia (FO 02-03)'"
-              class="flex items-center gap-1.5 rounded-lg border border-[#004e82]/30 bg-[#eaf2f8] px-3.5 py-2 text-sm text-[#004e82] shadow-sm transition-colors duration-200 hover:border-[#004e82]/60 hover:bg-[#dcebf5] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-[#004e82]/30 disabled:hover:bg-[#eaf2f8]">
+              class="btn border border-[#004e82]/20 bg-[#eef4fa] text-[#004e82] hover:bg-[#dcebf5]">
         <i *ngIf="!analizandoAvanzado" class="pi pi-chart-bar text-xs"></i>
         <i *ngIf="analizandoAvanzado" class="pi pi-spin pi-spinner text-xs"></i>
         {{ analizandoAvanzado ? 'Analizando…' : 'Análisis FO 02-03' }}
@@ -182,7 +196,7 @@
       <button (click)="exportarPapelDeTrabajo()"
               [disabled]="!puedeExportar"
               [title]="motivoExportBloqueado || 'Descargar el papel de trabajo FO 02-03'"
-              class="flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3.5 py-2 text-sm text-gray-700 shadow-sm transition-colors duration-200 hover:border-gray-400 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-gray-300 disabled:hover:bg-white">
+              class="btn btn-secundario">
         <i *ngIf="!exportando" class="pi pi-download text-xs"></i>
         <i *ngIf="exportando" class="pi pi-spin pi-spinner text-xs"></i>
         {{ exportando ? 'Generando…' : 'Exportar' }}
@@ -203,7 +217,7 @@
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
 
       <!-- LADO IZQUIERDO: Banco -->
-      <div class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm min-h-[450px] flex flex-col">
+      <div class="tarjeta p-5 min-h-[450px] flex flex-col">
 
         <!-- Aviso de como se concilia a mano. Solo cuando hay algo que emparejar:
              antes del cruce no hay bandeja de pendientes y la instruccion seria
@@ -340,7 +354,7 @@
       </div>
 
       <!-- LADO DERECHO: Xubio -->
-      <div class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm min-h-[450px] flex flex-col">
+      <div class="tarjeta p-5 min-h-[450px] flex flex-col">
         <div class="flex justify-between items-center mb-5">
           <h3 class="text-[15px] font-semibold text-gray-800">Movimientos en Xubio</h3>
           <!-- El destino natural del arrastre es esta tabla. Se dice aca y no
@@ -546,7 +560,7 @@
          partidas pendientes (en tránsito / a investigar), y arma el cuadro de
          control que explica la diferencia banco/empresa. -->
     <section *ngIf="analisisAvanzado"
-             class="mt-5 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+             class="tarjeta mt-5 p-5">
       <div class="mb-4 flex flex-wrap items-baseline justify-between gap-2">
         <h2 class="text-base font-medium text-gray-800">Conciliación FO 02-03</h2>
         <span class="text-[11px] text-gray-500">Análisis de lo que quedó sin coincidencia</span>
@@ -768,6 +782,83 @@
           </div>
         </div>
       </div>
+    </section>
+
+    <!-- 6. Asientos de ajuste: la partida doble de lo que quedó sin par. Se
+         arma en el backend (el mismo cálculo que la hoja del Excel) y se
+         muestra acá para revisarlo antes de bajar el papel de trabajo. -->
+    <section class="tarjeta mt-5 p-5">
+      <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-start gap-3">
+          <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#eef4fa] text-[#004e82]">
+            <i class="pi pi-book text-sm"></i>
+          </span>
+          <div>
+            <h2 class="text-base font-medium text-slate-800">Asientos de ajuste</h2>
+            <p class="text-xs text-slate-500">
+              Partida doble de las partidas sin coincidencia, con su contracuenta.
+            </p>
+          </div>
+        </div>
+        <button (click)="verAsientosDeAjuste()"
+                [disabled]="!puedeVerAsientos"
+                [title]="motivoAsientosBloqueado || 'Armar los asientos de ajuste de las partidas sin coincidencia'"
+                class="btn border border-[#004e82]/20 bg-[#eef4fa] text-[#004e82] hover:bg-[#dcebf5]">
+          <i *ngIf="!cargandoAsientos" class="pi pi-sitemap text-xs"></i>
+          <i *ngIf="cargandoAsientos" class="pi pi-spin pi-spinner text-xs"></i>
+          {{ cargandoAsientos ? 'Armando…' : 'Armar asientos' }}
+        </button>
+      </div>
+
+      <p *ngIf="!asientosAjuste && !cargandoAsientos" class="text-xs text-slate-500">
+        {{ motivoAsientosBloqueado || 'Armá los asientos para ver la partida doble de cada partida sin coincidencia.' }}
+      </p>
+
+      <div *ngIf="errorAsientos" class="mb-3 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
+        {{ errorAsientos }}
+      </div>
+
+      <ng-container *ngIf="asientosAjuste as resp">
+        <p *ngIf="resp.asientos.length === 0" class="text-xs text-slate-500">
+          No hay partidas sin coincidencia: no hay asientos de ajuste.
+        </p>
+
+        <div *ngIf="resp.asientos.length > 0" class="scroll-fino overflow-x-auto">
+          <table class="min-w-full text-xs">
+            <thead>
+              <tr class="border-b border-slate-200 text-slate-500">
+                <th class="px-3 py-2 text-left font-medium">Asiento</th>
+                <th class="px-3 py-2 text-left font-medium">Fecha</th>
+                <th class="px-3 py-2 text-left font-medium">Origen</th>
+                <th class="px-3 py-2 text-left font-medium">Cuenta</th>
+                <th class="px-3 py-2 text-left font-medium">Detalle</th>
+                <th class="px-3 py-2 text-right font-medium">Debe</th>
+                <th class="px-3 py-2 text-right font-medium">Haber</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              <ng-container *ngFor="let a of resp.asientos">
+                <tr *ngFor="let l of a.lineas" class="hover:bg-slate-50">
+                  <td class="px-3 py-2 font-medium tabular-nums text-slate-400">#{{ a.numero }}</td>
+                  <td class="whitespace-nowrap px-3 py-2">{{ a.fecha || '—' }}</td>
+                  <td class="px-3 py-2">{{ a.origen === 'banco' ? 'Banco' : 'Libro Mayor' }}</td>
+                  <td class="px-3 py-2 text-slate-700">{{ l.cuenta }}</td>
+                  <td class="px-3 py-2 text-slate-500">{{ l.detalle || '—' }}</td>
+                  <td class="px-3 py-2 text-right tabular-nums">{{ formatoImporte(l.debe) }}</td>
+                  <td class="px-3 py-2 text-right tabular-nums">{{ formatoImporte(l.haber) }}</td>
+                </tr>
+              </ng-container>
+            </tbody>
+            <tfoot>
+              <tr class="border-t border-slate-200 font-semibold text-slate-700">
+                <td class="px-3 py-2" colspan="5">{{ resp.asientos.length }} asiento(s) · Total general</td>
+                <td class="px-3 py-2 text-right tabular-nums">{{ formatoImporte(resp.total_debe) }}</td>
+                <td class="px-3 py-2 text-right tabular-nums">{{ formatoImporte(resp.total_haber) }}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </ng-container>
     </section>
 
   </div>

@@ -351,3 +351,30 @@ export interface RespuestaConciliacionAvanzada {
   estadisticas: EstadisticasConciliacion;
   reporte_markdown?: ReporteMarkdown;
 }
+
+/** Un renglón de un asiento de ajuste: una cuenta con su Debe o su Haber. */
+export interface LineaAsiento {
+  cuenta: string;
+  detalle: string;
+  debe: number;
+  haber: number;
+}
+
+/** Un asiento de ajuste de partida doble de una partida sin coincidencia. */
+export interface AsientoAjuste {
+  numero: number;
+  fecha: string | null;
+  origen: 'banco' | 'mayor' | string;
+  concepto: string;
+  referencia: string;
+  debe: number;
+  haber: number;
+  lineas: LineaAsiento[];
+}
+
+/** Respuesta de POST /exportar/asientos: la vista previa de los asientos. */
+export interface RespuestaAsientos {
+  asientos: AsientoAjuste[];
+  total_debe: number;
+  total_haber: number;
+}

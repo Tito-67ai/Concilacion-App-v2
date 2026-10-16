@@ -1,0 +1,84 @@
+<div class="min-h-screen bg-[#f4f6f8]">
+  <!-- Barra superior: solo en pantallas chicas, para abrir el menú. -->
+  <header
+    class="sticky top-0 z-30 flex items-center gap-3 border-b border-[color:var(--borde)] bg-white/90 px-4 py-3 backdrop-blur lg:hidden"
+  >
+    <button
+      type="button"
+      (click)="alternarMenu()"
+      aria-label="Abrir menú"
+      [attr.aria-expanded]="menuAbierto()"
+      class="flex h-9 w-9 items-center justify-center rounded-lg border border-[color:var(--borde)] text-slate-600 hover:bg-slate-50"
+    >
+      <i class="pi pi-bars"></i>
+    </button>
+    <span class="text-sm font-semibold text-slate-800">Conciliación Bancaria</span>
+  </header>
+
+  <!-- Fondo oscuro al abrir el menú en mobile. -->
+  <div
+    *ngIf="menuAbierto()"
+    (click)="cerrarMenu()"
+    class="fixed inset-0 z-30 bg-slate-900/40 lg:hidden"
+    aria-hidden="true"
+  ></div>
+
+  <!-- Barra lateral -->
+  <aside
+    class="fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-[color:var(--borde)] bg-white transition-transform duration-200 lg:translate-x-0"
+    [ngClass]="menuAbierto() ? 'translate-x-0' : '-translate-x-full'"
+  >
+    <!-- Marca -->
+    <div class="flex items-center gap-3 border-b border-[color:var(--borde)] px-5 py-5">
+      <span
+        class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[color:var(--marca)] text-white"
+      >
+        <i class="pi pi-chart-line text-lg"></i>
+      </span>
+      <div class="min-w-0">
+        <p class="truncate text-sm font-semibold text-slate-800">Conciliación</p>
+        <p class="truncate text-xs text-slate-500">Bancaria automática</p>
+      </div>
+      <button
+        type="button"
+        (click)="cerrarMenu()"
+        aria-label="Cerrar menú"
+        class="ml-auto flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 lg:hidden"
+      >
+        <i class="pi pi-times text-xs"></i>
+      </button>
+    </div>
+
+    <!-- Navegación -->
+    <nav class="flex-1 space-y-1 overflow-y-auto px-3 py-4">
+      <p class="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+        Operación
+      </p>
+      <a
+        *ngFor="let item of items"
+        [routerLink]="item.ruta"
+        [routerLinkActive]="'nav-activo'"
+        [routerLinkActiveOptions]="{ exact: !!item.exacta }"
+        (click)="cerrarMenu()"
+        class="nav-link"
+      >
+        <i [class]="item.icono"></i>
+        <span>{{ item.etiqueta }}</span>
+      </a>
+    </nav>
+
+    <!-- Pie -->
+    <div class="border-t border-[color:var(--borde)] px-5 py-4">
+      <p class="text-[11px] leading-relaxed text-slate-400">
+        Papel de trabajo FO 02-03
+      </p>
+    </div>
+  </aside>
+
+  <!-- Contenido -->
+  <main class="lg:pl-64">
+    <div class="mx-auto min-h-screen max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+      <router-outlet />
+    </div>
+  </main>
+</div>

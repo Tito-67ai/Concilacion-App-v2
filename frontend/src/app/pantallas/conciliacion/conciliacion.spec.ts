@@ -1024,6 +1024,66 @@ describe('ConciliacionComponent', () => {
   });
 
   // ------------------------------------------------------------------
+  // Asientos de ajuste: la partida doble de lo que quedo sin coincidencia
+  // ------------------------------------------------------------------
+
+  it('armar asientos pide la partida doble al backend y la muestra', async () => {
+    conBandejasListas();
+
+    component.verAsientosDeAjuste();
+    const peticion = http.expectOne(`${API}/exportar/asientos`);
+    expect(peticion.request.method).toBe('POST');
+    expect(peticion.request.body.pendientes_banco.length).toBe(2);
+
+    peticion.flush({
+      asientos: [
+        {
+          numero: 1,
+          fecha: '2026-07-01',
+          origen: 'banco',
+          concepto: 'COBRO CLIENTE A',
+          referencia: '',
+          debe: 1000,
+          haber: 1000,
+          lineas: [
+            { cuenta: 'Banco', detalle: 'COBRO CLIENTE A', debe: 1000, haber: 0 },
+            { cuenta: 'Cuentas a conciliar - Banco', detalle: 'COBRO CLIENTE A', debe: 0, haber: 1000 },
+          ],
+        },
+      ],
+      total_debe: 1000,
+      total_haber: 1000,
+    });
+    await fixture.whenStable();
+
+    expect(component.cargandoAsientos).toBe(false);
+    expect(component.asientosAjuste?.asientos.length).toBe(1);
+    // La contracuenta elegida por el backend tiene que verse en pantalla.
+    expect(fixture.nativeElement.textContent).toContain('Cuentas a conciliar - Banco');
+  });
+
+  it('sin partidas sin coincidencia no se piden asientos', () => {
+    component.verAsientosDeAjuste();
+
+    http.expectNone(`${API}/exportar/asientos`);
+    expect(component.errorAsientos).toContain('No hay partidas sin coincidencia');
+  });
+
+  it('mientras arma los asientos el boton queda bloqueado', () => {
+    conBandejasListas();
+
+    component.verAsientosDeAjuste();
+    http.expectOne(`${API}/exportar/asientos`);
+
+    expect(component.cargandoAsientos).toBe(true);
+    expect(component.puedeVerAsientos).toBe(false);
+
+    // Tres clicks seguidos tienen que ser una sola llamada.
+    component.verAsientosDeAjuste();
+    http.expectNone(`${API}/exportar/asientos`);
+  });
+
+  // ------------------------------------------------------------------
   // Afiliados de la web de Xubio en el inicio del panel derecho
   // ------------------------------------------------------------------
 

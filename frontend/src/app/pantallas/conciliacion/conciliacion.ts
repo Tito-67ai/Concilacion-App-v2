@@ -38,7 +38,7 @@ import {
   SeleccionImportacion,
 } from '../../servicios/importacion.service';
 
-const API = 'http://127.0.0.1:8000/api';
+const API = globalThis.__API_BASE__ || 'http://127.0.0.1:8000/api';
 
 // Un Excel de 30.000 filas tarda en pandas. Si no se corta, el overlay
 // "Procesando..." queda arriba para siempre cuando algo se rompe en el medio y

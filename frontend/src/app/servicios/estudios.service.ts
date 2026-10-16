@@ -1,7 +1,7 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Injectable, computed, inject, signal } from '@angular/core';
 
-const API = 'http://127.0.0.1:8000/api';
+const API = globalThis.__API_BASE__ || 'http://127.0.0.1:8000/api';
 
 /** De dónde salió la entrada: del selector superior, del catálogo, o de ambos. */
 export type OrigenEstudio = 'empresa' | 'cliente' | 'ambos';

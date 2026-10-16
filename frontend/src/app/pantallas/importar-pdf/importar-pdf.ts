@@ -13,7 +13,7 @@ import { Router } from '@angular/router';
 import { ImportacionService } from '../../servicios/importacion.service';
 import { RespuestaBancos } from '../../modelos/conciliacion';
 
-const API = 'http://127.0.0.1:8000/api';
+const API = globalThis.__API_BASE__ || 'http://127.0.0.1:8000/api';
 
 const TAMANO_MAXIMO_MB = 10;
 

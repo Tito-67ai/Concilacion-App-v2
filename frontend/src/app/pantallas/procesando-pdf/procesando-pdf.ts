@@ -6,7 +6,7 @@ import { Subscription, timeout } from 'rxjs';
 
 import { ImportacionService, MovimientoExtraido } from '../../servicios/importacion.service';
 
-const API = 'http://127.0.0.1:8000/api';
+const API = globalThis.__API_BASE__ || 'http://127.0.0.1:8000/api';
 
 /**
  * Un PDF de 30 paginas con tablas tarda bastante en pdfplumber. Si no se corta,

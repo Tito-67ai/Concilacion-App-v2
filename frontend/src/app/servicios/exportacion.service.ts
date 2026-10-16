@@ -4,7 +4,7 @@ import { Observable, map } from 'rxjs';
 
 import { SolicitudExportacion } from '../modelos/conciliacion';
 
-const API = 'http://127.0.0.1:8000/api';
+const API = globalThis.__API_BASE__ || 'http://127.0.0.1:8000/api';
 
 // El backend arma el .xlsx en memoria con openpyxl y la plantilla de la
 // auditoria. Para un extracto grande son decenas de miles de celdas: se tardan

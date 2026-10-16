@@ -1,13 +1,14 @@
 """Tests de los asientos de ajuste de partida doble (asientos_ajuste.py).
 
-Lo que se prueba:
-    - Cada partida sin coincidencia genera UN asiento que balancea (Debe = Haber).
-    - La contracuenta depende del lado y del tipo de concepto:
-        extracto + gasto bancario -> subcategoria (Comisiones, IVA, ...)
-        extracto + otro           -> cuenta de conciliacion de banco
-        mayor                     -> cuenta de conciliacion del mayor
-    - El signo del Banco es el correcto: entra plata = Debe Banco; sale = Haber Banco.
-    - La hoja "Asientos de Ajuste" viaja en el .xlsx con los asientos y el total.
+Lo que se prueba, segun las reglas de negocio (reglas_conciliacion.py):
+    - Extracto + gasto bancario / retencion-impuesto -> asiento, Debe contracuenta
+      / Haber Banco (sale plata).
+    - Extracto + debito automatico (pago directo) -> asiento a revisar contra la
+      cuenta de conciliacion de banco.
+    - Extracto + acreditacion sin comprobante -> NO asiento (revision manual).
+    - Mayor (esta en contabilidad pero no en el banco) -> NO asiento: diferencia
+      temporal que se arrastra.
+    - Cada asiento balancea (Debe = Haber) y la hoja viaja en el .xlsx.
 """
 
 import io
@@ -23,6 +24,11 @@ from app.models.schemas import (
     SolicitudExportacion,
 )
 from app.services import asientos_ajuste, exportador
+from app.services.reglas_conciliacion import (
+    ACCION_REVISAR,
+    TIPO_DEBITO_AUTOMATICO,
+    TIPO_PENDIENTE_TEMPORAL,
+)
 
 
 def _banco(**campos) -> PendienteExport:
@@ -42,14 +48,16 @@ def _mayor(**campos) -> PendienteExport:
 # ----------------------------------------------------------------------
 
 
-def test_un_asiento_por_partida_y_balancea():
+def test_solo_el_banco_genera_asiento_y_balancea():
+    # La comision del banco lleva asiento; la partida del mayor no.
     asientos = asientos_ajuste.construir_asientos(
         pendientes_banco=[_banco()],
         pendientes_xubio=[_mayor()],
     )
-    assert len(asientos) == 2
+    assert len(asientos) == 1
     assert all(a.balancea for a in asientos)
-    assert [a.numero for a in asientos] == [1, 2]
+    assert asientos[0].origen == asientos_ajuste.ORIGEN_BANCO
+    assert [a.numero for a in asientos] == [1]
 
 
 def test_gasto_bancario_usa_la_subcategoria_como_contracuenta():
@@ -68,22 +76,52 @@ def test_gasto_bancario_sin_subcategoria_usa_gastos_bancarios():
     assert settings.CUENTA_GASTOS_BANCARIOS in cuentas
 
 
-def test_credito_en_banco_debita_el_banco():
-    # Un credito del extracto (haber) es plata que entra: Debe Banco / Haber contra.
-    asiento = asientos_ajuste.asiento_desde_pendiente(1, _banco(concepto="TRANSFERENCIA", debe=0.0, haber=800.0))
+def test_retencion_impuesto_usa_la_cuenta_de_retenciones():
+    asiento = asientos_ajuste.asiento_desde_pendiente(1, _banco(concepto="SIRCREB", debe=120.0))
     assert asiento is not None
-    cuentas = {(l.cuenta, round(l.debe, 2), round(l.haber, 2)) for l in asiento.lineas}
-    assert (settings.CUENTA_BANCO, 800.0, 0.0) in cuentas
-    assert (settings.CUENTA_CONCILIACION_BANCO, 0.0, 800.0) in cuentas
-
-
-def test_partida_del_mayor_usa_la_cuenta_de_conciliacion_del_mayor():
-    asiento = asientos_ajuste.asiento_desde_pendiente(1, _mayor(concepto="ALQUILER", debe=300.0))
-    assert asiento is not None
-    assert asiento.origen == asientos_ajuste.ORIGEN_MAYOR
     cuentas = {l.cuenta for l in asiento.lineas}
-    assert settings.CUENTA_CONCILIACION_MAYOR in cuentas
+    assert settings.CUENTA_RETENCIONES in cuentas
+    # Sigue saliendo plata: Haber Banco.
+    assert (settings.CUENTA_BANCO, 0.0, 120.0) in {
+        (l.cuenta, round(l.debe, 2), round(l.haber, 2)) for l in asiento.lineas
+    }
+
+
+def test_credito_en_banco_no_genera_asiento():
+    # Una acreditacion sin comprobante es un ingreso no registrado: no se arma
+    # asiento automatico (la contracuenta es la cuenta del cliente).
+    asiento = asientos_ajuste.asiento_desde_pendiente(
+        1, _banco(concepto="TRANSFERENCIA", debe=0.0, haber=800.0)
+    )
+    assert asiento is None
+
+    clasificacion = asientos_ajuste.clasificar_pendiente(
+        _banco(concepto="TRANSFERENCIA", debe=0.0, haber=800.0)
+    )
+    assert clasificacion.accion == ACCION_REVISAR
+
+
+def test_debito_automatico_genera_asiento_a_revisar():
+    # Un pago directo que no es gasto ni impuesto: se propone asiento contra la
+    # cuenta de conciliacion de banco, marcado para revisar la contracuenta.
+    asiento = asientos_ajuste.asiento_desde_pendiente(
+        1, _banco(concepto="PAGO PROVEEDOR", debe=500.0)
+    )
+    assert asiento is not None
+    assert asiento.tipo == TIPO_DEBITO_AUTOMATICO
+    assert asiento.revisar_manual is True
+    cuentas = {l.cuenta for l in asiento.lineas}
+    assert settings.CUENTA_CONCILIACION_BANCO in cuentas
     assert settings.CUENTA_BANCO in cuentas
+
+
+def test_partida_del_mayor_no_genera_asiento():
+    asiento = asientos_ajuste.asiento_desde_pendiente(1, _mayor(concepto="ALQUILER", debe=300.0))
+    assert asiento is None
+
+    partida = asientos_ajuste.partida_temporal(_mayor(concepto="ALQUILER", debe=300.0))
+    assert partida.origen == asientos_ajuste.ORIGEN_MAYOR
+    assert partida.tipo == TIPO_PENDIENTE_TEMPORAL
 
 
 def test_partida_sin_importe_no_genera_asiento():
@@ -96,7 +134,17 @@ def test_totales_debe_y_haber_coinciden():
         pendientes_xubio=[_mayor()],
     )
     debe, haber = asientos_ajuste.totales(asientos)
-    assert debe == haber == 650.0
+    # 150 (comision) + 200 (IVA); el mayor de 300 no lleva asiento.
+    assert debe == haber == 350.0
+
+
+def test_proponer_asientos_separa_las_partidas_sin_asiento():
+    asientos, partidas = asientos_ajuste.proponer_asientos(
+        pendientes_banco=[_banco(), _banco(concepto="TRANSFERENCIA", debe=0.0, haber=900.0)],
+        pendientes_xubio=[_mayor()],
+    )
+    assert [a.concepto for a in asientos] == ["COMISION"]
+    assert {p.concepto for p in partidas} == {"TRANSFERENCIA", "ALQUILER"}
 
 
 # ----------------------------------------------------------------------
@@ -125,15 +173,19 @@ def _hoja_asientos(contenido: bytes):
 
 def test_la_hoja_de_asientos_viaja_en_el_archivo():
     hoja = _hoja_asientos(exportador.exportar(_solicitud()))
-    encabezados = [hoja.cell(row=exportador.FILA_ENCABEZADO_ASIENTOS, column=c).value for c in range(1, 8)]
+    encabezados = [
+        hoja.cell(row=exportador.FILA_ENCABEZADO_ASIENTOS, column=c).value
+        for c in range(1, len(exportador.COLUMNAS_ASIENTOS_AJUSTE) + 1)
+    ]
     assert encabezados == exportador.COLUMNAS_ASIENTOS_AJUSTE
 
     valores = [c.value for fila in hoja.iter_rows() for c in fila]
     assert "Comisiones" in valores
     assert "TOTAL GENERAL" in valores
-    # Los tres asientos (2 banco + 1 mayor) tienen su total.
+    # Los dos asientos del banco (comision e IVA); el mayor no lleva asiento.
     assert "Total asiento 1" in valores
-    assert "Total asiento 3" in valores
+    assert "Total asiento 2" in valores
+    assert "Total asiento 3" not in valores
 
 
 def test_la_hoja_de_asientos_balancea_a_nivel_total():
@@ -145,7 +197,7 @@ def test_la_hoja_de_asientos_balancea_a_nivel_total():
     )
     debe = hoja.cell(row=fila_total, column=6).value
     haber = hoja.cell(row=fila_total, column=7).value
-    assert debe == haber == 650.0
+    assert debe == haber == 350.0
 
 
 def test_la_hoja_de_asientos_se_escribe_sin_pendientes():

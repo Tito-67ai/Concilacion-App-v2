@@ -195,19 +195,22 @@ def test_libro_mayor_saldo_por_formula():
         assert celda.alignment.horizontal == "right"
 
 
-def test_libro_mayor_conciliados_en_amarillo_pendientes_en_verde():
+def test_libro_mayor_conciliados_en_amarillo_pendientes_sin_relleno():
     hoja = _mayor(exportador.exportar(_solicitud()))
-    # FCA-1 y FCA-2 tienen coincidencia -> amarillo en D/E
+    # FCA-1 y FCA-2 tienen coincidencia -> amarillo en D/E y Estado "Conciliado".
     for fila in (11, 12):
         for col in (4, 5):  # D, E
             c = hoja.cell(row=fila, column=col)
             if c.value not in (None, 0):
                 assert c.fill.fgColor.rgb == "FFFFFF00", f"Fila {fila} col {col} deberia ser amarillo"
-    # FCA-3 esta en pendientes_xubio -> sin coincidencia -> verde
+        assert hoja.cell(row=fila, column=10).value == "Conciliado"
+    # FCA-3 esta en pendientes_xubio -> sin coincidencia: SIN relleno (se elimino
+    # el verde) y con el estado en texto en la columna J.
     for col in (4, 5):
         c = hoja.cell(row=13, column=col)
         if c.value not in (None, 0):
-            assert c.fill.fgColor.rgb == "FF93C47D", f"Fila 13 col {col} deberia ser verde"
+            assert c.fill.fill_type is None, "el pendiente ya no se pinta"
+    assert hoja.cell(row=13, column=10).value == "Sin coincidencia"
 
 
 # ----------------------------------------------------------------------
@@ -280,15 +283,24 @@ def test_movimientos_bancarios_encabezados_sin_relleno():
         assert not c.fill.fill_type, f"{c.coordinate} no deberia tener relleno"
 
 
-def test_movimientos_bancarios_conciliados_en_amarillo_gastos_en_verde():
+def test_movimientos_bancarios_conciliados_en_amarillo_pendientes_sin_relleno():
     hoja = _movimientos(exportador.exportar(_solicitud()))
-    # COBRO (fila 10) y PAGO PROVEEDOR (fila 13) tienen coincidencia -> amarillo
+    # COBRO (fila 10) y PAGO PROVEEDOR (fila 13) tienen coincidencia -> amarillo.
     assert hoja["D10"].fill.fgColor.rgb == "FFFFFF00"
     assert hoja["C13"].fill.fgColor.rgb == "FFFFFF00"
-    # COMISION (fila 11) e IVA (fila 12) no tienen coincidencia pero son gasto
-    # bancario -> verde (van al cuadro de partidas pendientes de registracion).
-    assert hoja["C11"].fill.fgColor.rgb == "FF93C47D"
-    assert hoja["C12"].fill.fgColor.rgb == "FF93C47D"
+    assert hoja["F10"].value == "Conciliado"
+    assert hoja["F13"].value == "Conciliado"
+    # COMISION (fila 11) e IVA (fila 12) no tienen coincidencia: SIN relleno
+    # (se elimino el verde) y con el estado en texto en la columna F.
+    assert not hoja["C11"].fill.fill_type
+    assert not hoja["C12"].fill.fill_type
+    assert hoja["F11"].value == "Sin coincidencia"
+    assert hoja["F12"].value == "Sin coincidencia"
+
+
+def test_movimientos_bancarios_columna_estado_tiene_encabezado():
+    hoja = _movimientos(exportador.exportar(_solicitud()))
+    assert hoja.cell(row=8, column=6).value == "Estado"
 
 
 def test_movimientos_bancarios_comercial_sin_match_queda_sin_color():
@@ -313,7 +325,7 @@ def test_movimientos_bancarios_comercial_sin_match_queda_sin_color():
 def test_movimientos_bancarios_tiene_filtro():
     hoja = _movimientos(exportador.exportar(_solicitud()))
     # Filtro de Excel sobre la tabla, arrancando en el encabezado (fila 8).
-    assert hoja.auto_filter.ref == "A8:E13"
+    assert hoja.auto_filter.ref == "A8:F13"
 
 
 def test_movimientos_bancarios_no_duplica_lineas_repetidas():
@@ -418,7 +430,7 @@ def test_cuadro_asientos_importes_con_formato_contable():
 def test_el_filtro_del_extracto_no_traga_el_cuadro():
     """El auto_filter termina en el ultimo dato, no sobre el cuadro de abajo."""
     hoja = _movimientos(exportador.exportar(_solicitud()))
-    assert hoja.auto_filter.ref == "A8:E13"
+    assert hoja.auto_filter.ref == "A8:F13"
 
 
 # ----------------------------------------------------------------------

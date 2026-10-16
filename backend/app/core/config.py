@@ -72,8 +72,24 @@ class Settings(BaseSettings):
     # cuentas es de cada empresa.
     CUENTA_BANCO: str = "Banco"
     CUENTA_GASTOS_BANCARIOS: str = "Gastos bancarios"
+    CUENTA_RETENCIONES: str = "Retenciones e impuestos a favor"
     CUENTA_CONCILIACION_BANCO: str = "Cuentas a conciliar - Banco"
     CUENTA_CONCILIACION_MAYOR: str = "Cuentas a conciliar - Libro Mayor"
+
+    # Codigos del plan de cuentas de cada una de las anteriores. Van vacios por
+    # defecto: la app funciona solo con nombres, pero la pantalla de revision y
+    # el conector de Xubio prefieren el codigo para no depender del texto. Se
+    # cargan desde el .env segun el plan de cuentas de la empresa.
+    CUENTA_BANCO_CODIGO: str = ""
+    CUENTA_GASTOS_BANCARIOS_CODIGO: str = ""
+    CUENTA_RETENCIONES_CODIGO: str = ""
+    CUENTA_CONCILIACION_BANCO_CODIGO: str = ""
+    CUENTA_CONCILIACION_MAYOR_CODIGO: str = ""
+
+    # Si es True, el endpoint de inyeccion de asientos no llama a Xubio: arma el
+    # payload y devuelve el resultado simulado. Sirve para probar la pantalla de
+    # revision sin credenciales ni riesgo de cargar asientos de verdad.
+    XUBIO_INJECT_DRY_RUN: bool = True
 
 
 # Instancia global para usar en toda la app

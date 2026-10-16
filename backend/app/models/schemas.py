@@ -234,6 +234,11 @@ class LineaAsientoRespuesta(BaseModel):
     """Un renglon de un asiento de ajuste: una cuenta con su Debe o su Haber."""
 
     cuenta: str
+    # Codigo del plan de cuentas (puede ir vacio). La pantalla de revision deja
+    # editarlo antes de aprobar e inyectar en Xubio.
+    cuenta_codigo: str = ""
+    # "banco" o "contracuenta": distingue los dos renglones.
+    rol: str = ""
     detalle: str = ""
     debe: float = 0.0
     haber: float = 0.0
@@ -245,10 +250,19 @@ class AsientoRespuesta(BaseModel):
     numero: int
     fecha: Optional[date] = None
     origen: str
+    # Regla de negocio que lo genero (ver reglas_conciliacion.py).
+    tipo: str = ""
+    regla: str = ""
+    # "propuesto" | "editado" | "aprobado" | "inyectado" | "error".
+    estado: str = "propuesto"
+    revisar_manual: bool = False
     concepto: str = ""
     referencia: str = ""
+    cuit: Optional[str] = None
     debe: float = 0.0
     haber: float = 0.0
+    # True si Debe = Haber (la partida doble cierra).
+    balancea: bool = True
     lineas: list[LineaAsientoRespuesta] = Field(default_factory=list)
 
 
@@ -263,6 +277,74 @@ class RespuestaAsientos(BaseModel):
     asientos: list[AsientoRespuesta] = Field(default_factory=list)
     total_debe: float = 0.0
     total_haber: float = 0.0
+
+
+class CuentaDisponible(BaseModel):
+    """Una cuenta del plan de cuentas para elegir como contracuenta en la UI."""
+
+    codigo: str = ""
+    nombre: str
+    imputable: bool = True
+
+
+class PartidaTemporalRespuesta(BaseModel):
+    """Partida sin coincidencia que NO lleva asiento automatico.
+
+    - Ingreso/transferencia no registrada: se asigna la cuenta del cliente.
+    - Diferencia temporal del mayor: se arrastra al periodo siguiente.
+    """
+
+    origen: str
+    tipo: str
+    regla: str
+    fecha: Optional[date] = None
+    concepto: str = ""
+    referencia: str = ""
+    importe: float = 0.0
+    revisar_manual: bool = False
+
+
+class RespuestaPropuestaAsientos(BaseModel):
+    """Propuesta de asientos para la pantalla de revision y aprobacion."""
+
+    asientos: list[AsientoRespuesta] = Field(default_factory=list)
+    partidas_temporales: list[PartidaTemporalRespuesta] = Field(default_factory=list)
+    total_debe: float = 0.0
+    total_haber: float = 0.0
+    balancea: bool = True
+    cuentas_disponibles: list[CuentaDisponible] = Field(default_factory=list)
+
+
+class SolicitudAprobacionAsientos(BaseModel):
+    """Los asientos ya revisados que el usuario aprueba para inyectar.
+
+    Cada asiento trae las lineas con la cuenta y el codigo que el usuario pudo
+    haber editado en la pantalla.
+    """
+
+    asientos: list[AsientoRespuesta] = Field(default_factory=list)
+
+
+class ResultadoAsientoInyectado(BaseModel):
+    """Resultado de intentar inyectar un asiento en Xubio."""
+
+    numero: int
+    # "inyectado" | "dry_run" | "error".
+    estado: str
+    xubio_id: Optional[int] = None
+    error: Optional[str] = None
+    # El payload que se mando (o se mandaria) a Xubio, para auditar.
+    payload: dict = Field(default_factory=dict)
+
+
+class RespuestaAprobacionAsientos(BaseModel):
+    """Resultado de aprobar e inyectar la propuesta de asientos."""
+
+    exito: bool = True
+    dry_run: bool = False
+    inyectados: int = 0
+    errores: int = 0
+    resultados: list[ResultadoAsientoInyectado] = Field(default_factory=list)
 
 
 # ----------------------------------------------------------------------
@@ -481,11 +563,17 @@ class ConciliadoAvanzado(BaseModel):
 
 
 class AjusteContable(BaseModel):
-    """Movimiento solo en banco (gasto bancario sin asiento contable)."""
+    """Movimiento solo en banco que genera asiento de ajuste (gasto, impuesto,
+    retencion o debito automatico)."""
     origen: str = "ajuste_contable"
     fecha: Optional[date] = None
     concepto: str = ""
     referencia: Optional[str] = None
+    # Regla de negocio aplicada (reglas_conciliacion.py).
+    tipo: str = ""
+    regla: str = ""
+    accion: str = ""
+    revisar_manual: bool = False
     debito: float = 0.0
     credito: float = 0.0
     importe: float = 0.0
@@ -502,11 +590,19 @@ class AjusteContable(BaseModel):
 
 
 class PartidaPendienteBanco(BaseModel):
-    """Movimiento en banco sin par, que NO es gasto bancario (ej. transferencia)."""
+    """Movimiento en banco sin par que NO lleva asiento automatico.
+
+    Son las acreditaciones / transferencias no registradas: se marcan para
+    revision y se les asigna la cuenta del cliente.
+    """
     origen: str = "pendiente_banco"
     fecha: Optional[date] = None
     concepto: str = ""
     referencia: Optional[str] = None
+    tipo: str = ""
+    regla: str = ""
+    accion: str = ""
+    revisar_manual: bool = False
     debito: float = 0.0
     credito: float = 0.0
     importe: float = 0.0
@@ -523,12 +619,16 @@ class PartidaPendienteBanco(BaseModel):
 
 
 class PartidaPendienteMayor(BaseModel):
-    """Movimiento en mayor sin par en banco (pago/cheque no debitado)."""
+    """Movimiento en mayor sin par en banco (diferencia temporal, sin asiento)."""
     origen: str = "pendiente_mayor"
     fecha: Optional[date] = None
     concepto: str = ""
     referencia: Optional[str] = None
     comprobante: Optional[str] = None
+    tipo: str = ""
+    regla: str = ""
+    accion: str = ""
+    revisar_manual: bool = False
     debe: float = 0.0
     haber: float = 0.0
     importe: float = 0.0
@@ -549,6 +649,10 @@ class PartidasPendientesUnion(BaseModel):
     concepto: str = ""
     referencia: Optional[str] = None
     comprobante: Optional[str] = None
+    tipo: str = ""
+    regla: str = ""
+    accion: str = ""
+    revisar_manual: bool = False
     debe: float = 0.0
     haber: float = 0.0
     importe: float = 0.0
@@ -561,7 +665,6 @@ class PartidasPendientesUnion(BaseModel):
     cod_concepto: Optional[str] = None
     canal: Optional[str] = None
     banco_emisor: Optional[str] = None
-    comprobante: Optional[str] = None
     documento: Optional[str] = None
     cuenta: Optional[str] = None
     organizacion: Optional[str] = None

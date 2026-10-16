@@ -4,10 +4,12 @@ Conciliación Bancaria Avanzada - Algoritmo completo según modelo FO 02-03.
 Flujo:
 1. MATCHING EXACTO: Debe Mayor ↔ Crédito Banco (centavo a centavo) + fecha ±3 días
                   Haber Mayor ↔ Débito Banco (valor absoluto) + fecha ±3 días
-2. CLASIFICACIÓN:
+2. CLASIFICACIÓN (reglas de negocio en reglas_conciliacion.py):
    - CONCILIADOS: matching exacto por importe y fecha
-   - AJUSTES CONTABLES: solo en banco (gastos bancarios, comisiones, impuestos, retenciones)
-   - PARTIDAS PENDIENTES: solo en mayor (pagos/cheques emitidos no debitados)
+   - AJUSTES CONTABLES: solo en banco y con asiento automatico (gastos bancarios,
+     comisiones, impuestos, retenciones, debitos automaticos)
+   - PARTIDAS PENDIENTES: ingresos/transferencias no registradas (revision manual)
+     + movimientos del mayor sin par (diferencias temporales, se arrastran)
 3. ENRIQUECIMIENTO: busca CUIT/CBU/Nombre en extracto crudo para movimientos no identificados
 4. CUADRO DE CONTROL: totales ingresos/egresos, diferencias netas, tabla dinámica gastos bancarios
 """
@@ -22,7 +24,13 @@ from datetime import date, datetime
 from typing import Any, Optional
 
 from app.models.schemas import MovimientoBancario
-from app.services.clasificacion import clasificar, es_gasto_bancario
+from app.services.clasificacion import clasificar
+from app.services.reglas_conciliacion import (
+    ACCION_ASIENTO,
+    TIPO_GASTO_BANCARIO,
+    TIPO_RETENCION_IMPUESTO,
+    clasificar_sin_coincidencia,
+)
 from app.services.reporte_markdown import generar_reporte
 
 logger = logging.getLogger(__name__)
@@ -243,36 +251,49 @@ def _clasificar_ajustes_y_pendientes(
     usados_mayor: set[int],
 ) -> tuple[list[dict], list[dict]]:
     """
-    Clasifica los no emparejados:
-    - AJUSTES CONTABLES: movimientos de banco sin par, que son gastos bancarios
-      (comisiones, impuestos, retenciones, intereses, sellados, percepciones)
-    - PARTIDAS PENDIENTES: movimientos de mayor sin par (pagos/cheques no debitados)
-      + movimientos de banco que NO son gastos bancarios (ej. transferencias no identificadas)
+    Clasifica los no emparejados con las reglas de negocio (reglas_conciliacion):
+
+    - AJUSTES CONTABLES: movimientos del banco sin par que llevan asiento
+      automatico: gastos bancarios (comisiones, IVA, intereses), retenciones e
+      impuestos (SIRCREB, IIBB, ley 25.413) y debitos automaticos.
+    - PARTIDAS PENDIENTES: ingresos/transferencias no registradas (acreditacion
+      sin comprobante interno, a revision manual) y todos los movimientos del
+      mayor sin par (diferencias temporales: NO llevan asiento).
     """
     ajustes = []
     pendientes = []
 
-    # Ajustes contables: solo banco, gasto bancario, no emparejado
+    # Solo banco: los que llevan asiento van a ajustes, el resto a pendientes.
     for i, mov in enumerate(banco):
         if i in usados_banco:
             continue
-        if es_gasto_bancario(mov.concepto):
-            ajustes.append(_mov_a_dict_ajuste(mov))
+        clasificacion = clasificar_sin_coincidencia("banco", mov.concepto, mov.haber != 0)
+        if clasificacion.accion == ACCION_ASIENTO:
+            ajustes.append(_mov_a_dict_ajuste(mov, clasificacion))
         else:
-            # Movimiento de banco no gasto y sin par -> podría ser transferencia no identificada
-            # Lo tratamos como "pendiente de identificación" en el banco
-            pendientes.append(_mov_a_dict_pendiente_banco(mov))
+            pendientes.append(_mov_a_dict_pendiente_banco(mov, clasificacion))
 
-    # Partidas pendientes del mayor: no emparejadas
+    # Partidas del mayor: siempre diferencia temporal, sin asiento.
     for i, mov in enumerate(mayor):
         if i in usados_mayor:
             continue
-        pendientes.append(_mov_a_dict_pendiente_mayor(mov))
+        clasificacion = clasificar_sin_coincidencia("mayor", mov.concepto, mov.debe != 0)
+        pendientes.append(_mov_a_dict_pendiente_mayor(mov, clasificacion))
 
     return ajustes, pendientes
 
 
-def _mov_a_dict_ajuste(mov: MovimientoNormalizado) -> dict:
+def _campos_regla(clasificacion) -> dict:
+    """Los campos de la regla de negocio que acompanan a cada partida."""
+    return {
+        "tipo": clasificacion.tipo,
+        "regla": clasificacion.regla,
+        "accion": clasificacion.accion,
+        "revisar_manual": clasificacion.revisar_manual,
+    }
+
+
+def _mov_a_dict_ajuste(mov: MovimientoNormalizado, clasificacion=None) -> dict:
     return {
         "origen": "ajuste_contable",
         "fecha": mov.fecha.isoformat() if mov.fecha else None,
@@ -289,10 +310,11 @@ def _mov_a_dict_ajuste(mov: MovimientoNormalizado) -> dict:
         "cod_concepto": mov.cod_concepto,
         "canal": mov.canal,
         "banco_emisor": mov.banco_emisor,
+        **(_campos_regla(clasificacion) if clasificacion else {}),
     }
 
 
-def _mov_a_dict_pendiente_banco(mov: MovimientoNormalizado) -> dict:
+def _mov_a_dict_pendiente_banco(mov: MovimientoNormalizado, clasificacion=None) -> dict:
     return {
         "origen": "pendiente_banco",
         "fecha": mov.fecha.isoformat() if mov.fecha else None,
@@ -309,10 +331,11 @@ def _mov_a_dict_pendiente_banco(mov: MovimientoNormalizado) -> dict:
         "cod_concepto": mov.cod_concepto,
         "canal": mov.canal,
         "banco_emisor": mov.banco_emisor,
+        **(_campos_regla(clasificacion) if clasificacion else {}),
     }
 
 
-def _mov_a_dict_pendiente_mayor(mov: MovimientoNormalizado) -> dict:
+def _mov_a_dict_pendiente_mayor(mov: MovimientoNormalizado, clasificacion=None) -> dict:
     return {
         "origen": "pendiente_mayor",
         "fecha": mov.fecha.isoformat() if mov.fecha else None,
@@ -328,6 +351,7 @@ def _mov_a_dict_pendiente_mayor(mov: MovimientoNormalizado) -> dict:
         "cuenta": None,
         "organizacion": None,
         "descripcion": mov.concepto,
+        **(_campos_regla(clasificacion) if clasificacion else {}),
     }
 
 
@@ -430,7 +454,15 @@ def _tabla_dinamica_gastos(ajustes: list[dict]) -> list[dict]:
     debitos: dict[str, Decimal] = defaultdict(Decimal)
     conteos: dict[str, int] = defaultdict(int)
 
+    # El cuadro es de GASTOS bancarios: los debitos automaticos comerciales
+    # (tipo debito_automatico) llevan asiento pero no son gasto y no entran aca.
+    # Los dicts sin `tipo` (tests y llamadas viejas) se cuentan igual.
+    tipos_gasto = (TIPO_GASTO_BANCARIO, TIPO_RETENCION_IMPUESTO)
+
     for a in ajustes:
+        tipo = a.get("tipo")
+        if tipo is not None and tipo not in tipos_gasto:
+            continue
         concepto_original = (a.get("concepto", "") or "").strip()
         # Normalizar: quitar espacios múltiples y pasar a mayúsculas.
         concepto_norm = " ".join(concepto_original.upper().split())

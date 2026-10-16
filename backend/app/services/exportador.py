@@ -16,9 +16,11 @@ Hoja "Movimientos Bancarios" - extracto resumido del banco:
     Fila 9      "Saldo Inicial" con el saldo en la columna E.
     Fila 10+    TODOS los movimientos del extracto (sin repetidos), debito=negativo, credito=positivo, saldo acumulado.
 
-    Encabezado sin relleno y con filtro de Excel (A8:E{ultima fila}). En los datos
-    se marca: amarillo = tiene coincidencia (conciliado); verde = no tiene
-    coincidencia (partida pendiente). El Libro Mayor usa el mismo criterio.
+    Encabezado sin relleno y con filtro de Excel (A8:F{ultima fila}). En los datos
+    se marca: amarillo = tiene coincidencia (conciliado); sin relleno = no tiene
+    coincidencia (partida pendiente). El estado sale etiquetado en texto en la
+    columna Estado ("Conciliado" / "Sin coincidencia"), no por color. El Libro
+    Mayor usa el mismo criterio (columna J).
 
 Cuadro de sumas por subcategoria (cols I-K de Movimientos Bancarios):
     Concepto | Suma Crédito | Suma Débito
@@ -67,6 +69,7 @@ from app.models.schemas import (
 )
 from app.services.clasificacion import es_gasto_bancario, _subcategoria_gasto
 from app.services.asientos_ajuste import ETIQUETA_ORIGEN, construir_asientos, totales
+from app.services.reglas_conciliacion import ETIQUETAS_TIPO
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +134,8 @@ COLUMNAS_MOV = [
 COLUMNAS_ASIENTOS = ["Fecha", "Detalle", "Debe", "Haber", "Importe"]
 # Hoja "Asientos de Ajuste": una fila por renglon del asiento, con la partida
 # doble completa (Debe y Haber por cuenta), mas el numero de asiento para poder
-# agruparlos. Es la hoja que se carga en el sistema contable.
+# agruparlos y el tipo de regla que lo genero. Es la hoja que se carga en el
+# sistema contable.
 COLUMNAS_ASIENTOS_AJUSTE = [
     "Asiento",  # A
     "Fecha",    # B
@@ -140,6 +144,7 @@ COLUMNAS_ASIENTOS_AJUSTE = [
     "Detalle",  # E
     "Debe",     # F
     "Haber",    # G
+    "Tipo",     # H
 ]
 FILA_TITULO_ASIENTOS = 1
 FILA_ENCABEZADO_ASIENTOS = 4
@@ -157,12 +162,14 @@ ANCHOS_MOV = {"A": 14.0, "B": 45.0, "C": 18.0, "D": 18.0, "E": 18.0, "I": 16.0, 
 
 RELLENO_ENCABEZADO = PatternFill("solid", fgColor="FF00B0F0")
 RELLENO_CONCILIADO = PatternFill("solid", fgColor="FFFFFF00")     # amarillo: tiene coincidencia
-# Verde: solo para el debito del banco SIN coincidencia que es gasto o impuesto
-# bancario puro (comision, IVA, imp. ley 25.413, SIRCREB, sellado), segun la
-# jerarquia de colores de FO 02-03. El resto de los pendientes comerciales
-# queda sin color, para auditoria manual.
-RELLENO_NO_CONCILIADO = PatternFill("solid", fgColor="FF93C47D")
-RELLENO_AJUSTE_CONTABLE = PatternFill("solid", fgColor="FFE69138")  # sin uso hoy
+# Los registros SIN coincidencia ya no se pintan (se elimino el verde): van con
+# el estado "Sin coincidencia" en la columna Estado, sin relleno, para que la
+# auditoria se lea por la etiqueta y no por el color.
+ESTADO_CONCILIADO = "Conciliado"
+ESTADO_SIN_COINCIDENCIA = "Sin coincidencia"
+COLUMNA_ESTADO_MAYOR = 10   # J
+COLUMNA_ESTADO_MOV = 6      # F
+ANCHO_ESTADO = 18.0
 FUENTE_ENCABEZADO = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
 FUENTE_ENCABEZADO_OSCURO = Font(name="Calibri", size=11, bold=True)  # para fondos claros
 FUENTE_TITULO = Font(name="Calibri", size=11, bold=True)
@@ -410,6 +417,12 @@ def _armar_libro_mayor(hoja: Worksheet, solicitud: SolicitudExportacion, pendien
 
     # Encabezados en fila 9
     _escribir_encabezados(hoja, FILA_ENCABEZADO_MAYOR, COLUMNAS_MAYOR, con_relleno=False)
+    # Columna Estado (J): "Conciliado" o "Sin coincidencia". Reemplaza el color
+    # como indicador (los sin coincidencia ya no se pintan).
+    celda_estado = hoja.cell(row=FILA_ENCABEZADO_MAYOR, column=COLUMNA_ESTADO_MAYOR, value="Estado")
+    celda_estado.font = FUENTE_ENCABEZADO_OSCURO
+    celda_estado.alignment = ALINEACION_CENTRO
+    hoja.column_dimensions[chr(64 + COLUMNA_ESTADO_MAYOR)].width = ANCHO_ESTADO
 
     # Fila Saldo Inicial (10). El modelo de auditoria la escribe con la fecha de
     # apertura (el dia anterior al primer movimiento): sin eso la fila aparecia
@@ -466,19 +479,24 @@ def _armar_libro_mayor(hoja: Worksheet, solicitud: SolicitudExportacion, pendien
         celda_saldo.number_format = FORMATO_IMPORTE
         celda_saldo.alignment = ALINEACION_DERECHA
 
-        # Resaltar: amarillo si tiene coincidencia (conciliado), verde si no la
-        # tiene (partida pendiente del mayor). Solo se pintan las celdas con importe.
+        # Indicador de estado (reemplaza el color): amarillo si tiene
+        # coincidencia (conciliado), sin relleno + etiqueta si no la tiene.
+        # Solo se pinta la celda con importe; el Estado va en la columna J.
         clave = _clave_mayor(mov.fecha, mov.concepto, mov.comprobante, mov.debe, mov.haber)
         es_pendiente = pendientes_xubio.get(clave, 0) > 0
-        relleno = RELLENO_CONCILIADO
         if es_pendiente:
             pendientes_xubio[clave] -= 1
-            relleno = RELLENO_NO_CONCILIADO
         if debe or haber:
             for col_idx in (4, 5):  # D, E
                 c = hoja.cell(row=fila, column=col_idx)
-                if c.value not in (None, 0):
-                    c.fill = relleno
+                if c.value not in (None, 0) and not es_pendiente:
+                    c.fill = RELLENO_CONCILIADO
+        celda_estado = hoja.cell(
+            row=fila,
+            column=COLUMNA_ESTADO_MAYOR,
+            value=ESTADO_SIN_COINCIDENCIA if es_pendiente else ESTADO_CONCILIADO,
+        )
+        celda_estado.alignment = ALINEACION_CENTRO
 
         fila += 1
 
@@ -497,14 +515,10 @@ def _armar_movimientos_bancarios(
 ) -> int:
     """Tabla de 5 columnas: Fecha | Concepto | Debito | Credito | Saldo (acumulado).
 
-    Encabezado sin relleno y con filtro de Excel (A8:E{ultima fila}). En los datos
-    se marca el criterio de la conciliacion (jerarquia FO 02-03):
-      - amarillo: el movimiento del banco tiene coincidencia (conciliado).
-      - verde:    sin coincidencia y es gasto o impuesto bancario puro
-                  (comision, IVA, imp. ley 25.413, SIRCREB, sellado): va al
-                  cuadro de partidas en banco pendientes de registracion.
-      - sin color: sin coincidencia y no es gasto (ej. transferencia sin
-                  identificar): partida comercial a auditar a mano.
+    Encabezado sin relleno y con filtro de Excel (A8:F{ultima fila}). En los datos
+    se marca el indicador de estado en la columna F ("Conciliado" /
+    "Sin coincidencia"): los movimientos con coincidencia van en amarillo y los
+    sin coincidencia quedan sin relleno, con la etiqueta (se elimino el verde).
 
     Devuelve la primera fila libre debajo de la tabla, donde va el cuadro de
     asientos sin coincidencia.
@@ -512,9 +526,13 @@ def _armar_movimientos_bancarios(
     # Anchos
     for col, ancho in ANCHOS_MOV.items():
         hoja.column_dimensions[col].width = ancho
+    hoja.column_dimensions[chr(64 + COLUMNA_ESTADO_MOV)].width = ANCHO_ESTADO
 
     # Encabezados en fila 8, sin relleno (texto oscuro para que se lea)
     _escribir_encabezados(hoja, FILA_ENCABEZADO_MOV, COLUMNAS_MOV, con_relleno=False)
+    celda_estado = hoja.cell(row=FILA_ENCABEZADO_MOV, column=COLUMNA_ESTADO_MOV, value="Estado")
+    celda_estado.font = FUENTE_ENCABEZADO_OSCURO
+    celda_estado.alignment = ALINEACION_CENTRO
 
     # Fila Saldo Inicial (9) - solo el saldo en col E
     _escribir_fila(
@@ -553,36 +571,33 @@ def _armar_movimientos_bancarios(
         celda_saldo.number_format = FORMATO_IMPORTE
         celda_saldo.alignment = ALINEACION_DERECHA
 
-        # Jerarquia de colores FO 02-03 (pestana Movimientos Bancarios):
-        #   amarillo: el movimiento cruzo contra el Libro Mayor (conciliado).
-        #   verde:    debito del banco SIN coincidencia y que es gasto o
-        #             impuesto bancario puro (comision, IVA, imp. ley 25.413,
-        #             SIRCREB, sellado). Son las partidas que van al cuadro de
-        #             pendientes de registracion contable.
-        #   sin color: operacion comercial sin match, a auditoria manual.
+        # Indicador de estado (reemplaza el color): amarillo si cruzo contra el
+        # Libro Mayor (conciliado); sin relleno + etiqueta "Sin coincidencia" si
+        # no tiene par. Se elimino el verde: el estado se lee por la columna F.
         clave = _clave_banco(mov.fecha, mov.concepto, mov.debe, mov.haber)
         es_pendiente = pendientes_banco_counter.get(clave, 0) > 0
-        if not es_pendiente:
-            relleno = RELLENO_CONCILIADO
-        else:
+        if es_pendiente:
             pendientes_banco_counter[clave] -= 1
-            relleno = (
-                RELLENO_NO_CONCILIADO if es_gasto_bancario(mov.concepto) else None
-            )
-        if relleno is not None and (debe or haber):
+        if (debe or haber) and not es_pendiente:
             for col_idx in (3, 4):  # C, D
                 c = hoja.cell(row=fila, column=col_idx)
                 if c.value is not None:
-                    c.fill = relleno
+                    c.fill = RELLENO_CONCILIADO
+        celda_estado = hoja.cell(
+            row=fila,
+            column=COLUMNA_ESTADO_MOV,
+            value=ESTADO_SIN_COINCIDENCIA if es_pendiente else ESTADO_CONCILIADO,
+        )
+        celda_estado.alignment = ALINEACION_CENTRO
 
         fila += 1
 
-    # Filtro de Excel sobre la tabla (A8:E{ultima fila}). Arranca en el
+    # Filtro de Excel sobre la tabla (A8:F{ultima fila}). Arranca en el
     # encabezado para que los desplegables queden ahi, como el modelo. El
     # filtro termina en el ultimo dato: el cuadro de asientos de abajo queda
     # afuera para que no se vaya con la fila filtrada.
     ultima = max(fila - 1, FILA_SALDO_INICIAL_MOV)
-    hoja.auto_filter.ref = f"A{FILA_ENCABEZADO_MOV}:E{ultima}"
+    hoja.auto_filter.ref = f"A{FILA_ENCABEZADO_MOV}:F{ultima}"
 
     return fila
 
@@ -713,9 +728,11 @@ def _armar_hoja_asientos(
         row=FILA_TITULO_ASIENTOS + 1,
         column=1,
         value=(
-            "Cada partida sin par genera un asiento de partida doble: entra plata "
+            "Solo las partidas del extracto que llevan asiento de ajuste (gastos "
+            "bancarios, impuestos/retenciones y debitos automaticos): entra plata "
             "Debe contracuenta / Haber Banco; sale plata Debe Banco / Haber "
-            "contracuenta. Las cuentas se configuran desde el .env."
+            "contracuenta. Los ingresos no registrados y las partidas del mayor no "
+            "llevan asiento automatico. Las cuentas se configuran desde el .env."
         ),
     )
     nota.font = FUENTE_NORMAL
@@ -726,7 +743,7 @@ def _armar_hoja_asientos(
         celda.alignment = ALINEACION_CENTRO
         celda.border = BORDE_CUADRO
 
-    for col, ancho in {"A": 9.0, "B": 12.0, "C": 12.0, "D": 32.0, "E": 45.0, "F": 16.0, "G": 16.0}.items():
+    for col, ancho in {"A": 9.0, "B": 12.0, "C": 12.0, "D": 32.0, "E": 45.0, "F": 16.0, "G": 16.0, "H": 22.0}.items():
         hoja.column_dimensions[col].width = ancho
 
     fila = FILA_PRIMER_ASIENTO
@@ -741,6 +758,7 @@ def _armar_hoja_asientos(
         return
 
     for asiento in asientos:
+        etiqueta_tipo = ETIQUETAS_TIPO.get(asiento.tipo, asiento.tipo)
         for linea in asiento.lineas:
             _escribir_fila(
                 hoja,
@@ -753,11 +771,12 @@ def _armar_hoja_asientos(
                     linea.detalle,
                     linea.debe if linea.debe else None,
                     linea.haber if linea.haber else None,
+                    etiqueta_tipo,
                 ],
                 formato_importe_idx={5, 6},  # F, G
             )
             hoja.cell(row=fila, column=2).number_format = FORMATO_FECHA
-            for col in range(1, 8):
+            for col in range(1, 9):
                 hoja.cell(row=fila, column=col).border = BORDE_CUADRO
             for col in (6, 7):
                 celda = hoja.cell(row=fila, column=col)
@@ -769,10 +788,10 @@ def _armar_hoja_asientos(
         _escribir_fila(
             hoja,
             fila,
-            [None, None, None, f"Total asiento {asiento.numero}", None, asiento.debe, asiento.haber],
+            [None, None, None, f"Total asiento {asiento.numero}", None, asiento.debe, asiento.haber, None],
             formato_importe_idx={5, 6},
         )
-        for col in range(1, 8):
+        for col in range(1, 9):
             celda = hoja.cell(row=fila, column=col)
             celda.border = BORDE_DOBLE
             if col == 4:
@@ -795,10 +814,11 @@ def _armar_hoja_asientos(
             f"{len(asientos)} asiento(s)",
             total_debe,
             total_haber,
+            None,
         ],
         formato_importe_idx={5, 6},
     )
-    for col in range(1, 8):
+    for col in range(1, 9):
         celda = hoja.cell(row=fila, column=col)
         celda.border = BORDE_CUADRO
         if col in (4, 5, 6, 7):

@@ -138,8 +138,8 @@ class TestClasificacionAjustesPendientes:
         assert ajustes[0]["origen"] == "ajuste_contable"
         assert ajustes[0]["concepto"] == "COMISION"
 
-    def test_pago_operativo_en_banco_sin_par_es_pendiente_banco(self):
-        """Pago a proveedor en banco sin par -> pendiente_banco (no es gasto)."""
+    def test_pago_operativo_en_banco_sin_par_es_ajuste_a_revisar(self):
+        """Pago a proveedor en banco sin par -> debito automatico: asiento a revisar."""
         banco = [{"fecha": "2026-07-01", "concepto": "PAGO PROVEEDOR", "debe": 500, "haber": 0, "saldo": 500, "referencia": "OP-1"}]
         mayor = []
 
@@ -149,9 +149,10 @@ class TestClasificacionAjustesPendientes:
         _, usados_b, usados_m = _matching_exacto(banco_n, mayor_n)
         ajustes, pendientes = _clasificar_ajustes_y_pendientes(banco_n, mayor_n, usados_b, usados_m)
 
-        assert len(ajustes) == 0
-        assert len(pendientes) == 1
-        assert pendientes[0]["origen"] == "pendiente_banco"
+        assert len(ajustes) == 1
+        assert ajustes[0]["tipo"] == "debito_automatico"
+        assert ajustes[0]["revisar_manual"] is True
+        assert len(pendientes) == 0
 
     def test_movimiento_mayor_sin_par_es_pendiente_mayor(self):
         banco = []

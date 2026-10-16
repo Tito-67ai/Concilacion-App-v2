@@ -230,6 +230,41 @@ class SolicitudExportacion(BaseModel):
     encabezado: EncabezadoConciliacion = Field(default_factory=EncabezadoConciliacion)
 
 
+class LineaAsientoRespuesta(BaseModel):
+    """Un renglon de un asiento de ajuste: una cuenta con su Debe o su Haber."""
+
+    cuenta: str
+    detalle: str = ""
+    debe: float = 0.0
+    haber: float = 0.0
+
+
+class AsientoRespuesta(BaseModel):
+    """Un asiento de ajuste de partida doble, listo para mostrar o cargar."""
+
+    numero: int
+    fecha: Optional[date] = None
+    origen: str
+    concepto: str = ""
+    referencia: str = ""
+    debe: float = 0.0
+    haber: float = 0.0
+    lineas: list[LineaAsientoRespuesta] = Field(default_factory=list)
+
+
+class RespuestaAsientos(BaseModel):
+    """Los asientos de ajuste de las partidas sin coincidencia.
+
+    Es la vista previa de la hoja "Asientos de Ajuste" del papel de trabajo: el
+    mismo calculo (asientos_ajuste.py) que arma el Excel, para que la pantalla
+    no reimplemente la partida doble por su cuenta.
+    """
+
+    asientos: list[AsientoRespuesta] = Field(default_factory=list)
+    total_debe: float = 0.0
+    total_haber: float = 0.0
+
+
 # ----------------------------------------------------------------------
 # Afiliados (clientes) desde la web de Xubio
 # ----------------------------------------------------------------------

@@ -4,8 +4,14 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
-from app.models.schemas import SolicitudExportacion
+from app.models.schemas import (
+    AsientoRespuesta,
+    LineaAsientoRespuesta,
+    RespuestaAsientos,
+    SolicitudExportacion,
+)
 from app.services import exportador
+from app.services.asientos_ajuste import construir_asientos, totales
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +20,45 @@ router = APIRouter()
 TIPO_XLSX = (
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
+
+
+@router.post("/asientos", response_model=RespuestaAsientos)
+async def asientos_de_ajuste(solicitud: SolicitudExportacion) -> RespuestaAsientos:
+    """Vista previa de los asientos de ajuste de las partidas sin coincidencia.
+
+    Es el mismo calculo que usa el Excel (asientos_ajuste.py): cada partida sin
+    par se convierte en un asiento de partida doble con su contracuenta. La
+    pantalla lo muestra antes de bajar el papel de trabajo.
+    """
+    asientos = construir_asientos(solicitud.pendientes_banco, solicitud.pendientes_xubio)
+    total_debe, total_haber = totales(asientos)
+
+    return RespuestaAsientos(
+        asientos=[
+            AsientoRespuesta(
+                numero=a.numero,
+                fecha=a.fecha,
+                origen=a.origen,
+                concepto=a.concepto,
+                referencia=a.referencia,
+                debe=round(a.debe, 2),
+                haber=round(a.haber, 2),
+                lineas=[
+                    LineaAsientoRespuesta(
+                        cuenta=l.cuenta,
+                        detalle=l.detalle,
+                        debe=round(l.debe, 2),
+                        haber=round(l.haber, 2),
+                    )
+                    for l in a.lineas
+                ],
+            )
+            for a in asientos
+        ],
+        total_debe=total_debe,
+        total_haber=total_haber,
+    )
+
 
 
 @router.post("/conciliacion")

@@ -66,6 +66,7 @@ from app.models.schemas import (
     SolicitudExportacion,
 )
 from app.services.clasificacion import es_gasto_bancario, _subcategoria_gasto
+from app.services.asientos_ajuste import ETIQUETA_ORIGEN, construir_asientos, totales
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,7 @@ ALTO_LOGO_MAX = 78    # px, entra en las filas 1-3
 HOJA_MAYOR = "Libro Mayor"
 HOJA_MOVIMIENTOS = "Movimientos Bancarios"
 HOJA_EXTRACTO_BRUTO = "Extracto Bruto"
+HOJA_ASIENTOS = "Asientos de Ajuste"
 
 # Formatos del formulario. El numero usa el contable heredado de la plantilla
 # (el cero se ve "-") y las fechas van dd/mm/yyyy. La celda del periodo es la
@@ -127,6 +129,21 @@ COLUMNAS_MOV = [
 # Cuadro de asientos sin coincidencia (debajo de cada tabla). Cinco columnas
 # en A-E de las dos hojas: es el mismo ancho que ya traen las tablas.
 COLUMNAS_ASIENTOS = ["Fecha", "Detalle", "Debe", "Haber", "Importe"]
+# Hoja "Asientos de Ajuste": una fila por renglon del asiento, con la partida
+# doble completa (Debe y Haber por cuenta), mas el numero de asiento para poder
+# agruparlos. Es la hoja que se carga en el sistema contable.
+COLUMNAS_ASIENTOS_AJUSTE = [
+    "Asiento",  # A
+    "Fecha",    # B
+    "Origen",   # C
+    "Cuenta",   # D
+    "Detalle",  # E
+    "Debe",     # F
+    "Haber",    # G
+]
+FILA_TITULO_ASIENTOS = 1
+FILA_ENCABEZADO_ASIENTOS = 4
+FILA_PRIMER_ASIENTO = 5
 # Una fila en blanco separa la tabla del cuadro, para que el filtro de Excel
 # del extracto no lo trague ni parezca una continuacion de los datos.
 FILA_SEPARACION_CUADRO = 2
@@ -663,6 +680,143 @@ def _armar_cuadro_asientos(
     return fila + 1
 
 
+def _armar_hoja_asientos(
+    libro,
+    pendientes_banco: list[PendienteExport],
+    pendientes_xubio: list[PendienteExport],
+) -> None:
+    """Crea/reescribe la hoja "Asientos de Ajuste" con la partida doble.
+
+    Una fila por renglon de cada asiento (cuenta con su Debe o su Haber), el
+    numero de asiento para agruparlos, un renglon "Total asiento N" que muestra
+    que cada uno balancea, y al pie el total general con la verificacion
+    Debe = Haber. Se arma SIEMPRE, aunque no haya partidas: en ese caso queda el
+    titulo y una nota, para que el contador vea que no se olvido nada.
+    """
+    if HOJA_ASIENTOS in libro.sheetnames:
+        hoja = libro[HOJA_ASIENTOS]
+        # Se vacia porque el libro se carga de la plantilla y podria traer una
+        # version vieja de la hoja: escribir encima dejaria filas huerfanas.
+        libro.remove(hoja)
+    hoja = libro.create_sheet(HOJA_ASIENTOS)
+
+    asientos = construir_asientos(pendientes_banco, pendientes_xubio)
+
+    titulo = hoja.cell(
+        row=FILA_TITULO_ASIENTOS,
+        column=1,
+        value="Asientos de Ajuste - Partidas sin coincidencia (FO 02-03)",
+    )
+    titulo.font = FUENTE_TITULO
+
+    nota = hoja.cell(
+        row=FILA_TITULO_ASIENTOS + 1,
+        column=1,
+        value=(
+            "Cada partida sin par genera un asiento de partida doble: entra plata "
+            "Debe contracuenta / Haber Banco; sale plata Debe Banco / Haber "
+            "contracuenta. Las cuentas se configuran desde el .env."
+        ),
+    )
+    nota.font = FUENTE_NORMAL
+
+    for i, nombre in enumerate(COLUMNAS_ASIENTOS_AJUSTE):
+        celda = hoja.cell(row=FILA_ENCABEZADO_ASIENTOS, column=1 + i, value=nombre)
+        celda.font = FUENTE_ENCABEZADO_OSCURO
+        celda.alignment = ALINEACION_CENTRO
+        celda.border = BORDE_CUADRO
+
+    for col, ancho in {"A": 9.0, "B": 12.0, "C": 12.0, "D": 32.0, "E": 45.0, "F": 16.0, "G": 16.0}.items():
+        hoja.column_dimensions[col].width = ancho
+
+    fila = FILA_PRIMER_ASIENTO
+
+    if not asientos:
+        celda = hoja.cell(
+            row=fila,
+            column=1,
+            value="Sin partidas sin coincidencia: no hay asientos de ajuste.",
+        )
+        celda.font = FUENTE_NORMAL
+        return
+
+    for asiento in asientos:
+        for linea in asiento.lineas:
+            _escribir_fila(
+                hoja,
+                fila,
+                [
+                    asiento.numero,
+                    asiento.fecha,
+                    ETIQUETA_ORIGEN.get(asiento.origen, asiento.origen),
+                    linea.cuenta,
+                    linea.detalle,
+                    linea.debe if linea.debe else None,
+                    linea.haber if linea.haber else None,
+                ],
+                formato_importe_idx={5, 6},  # F, G
+            )
+            hoja.cell(row=fila, column=2).number_format = FORMATO_FECHA
+            for col in range(1, 8):
+                hoja.cell(row=fila, column=col).border = BORDE_CUADRO
+            for col in (6, 7):
+                celda = hoja.cell(row=fila, column=col)
+                celda.number_format = FORMATO_IMPORTE
+                celda.alignment = ALINEACION_DERECHA
+            fila += 1
+
+        # Total del asiento: deja a la vista que la partida doble cierra.
+        _escribir_fila(
+            hoja,
+            fila,
+            [None, None, None, f"Total asiento {asiento.numero}", None, asiento.debe, asiento.haber],
+            formato_importe_idx={5, 6},
+        )
+        for col in range(1, 8):
+            celda = hoja.cell(row=fila, column=col)
+            celda.border = BORDE_DOBLE
+            if col == 4:
+                celda.font = FUENTE_TITULO
+            if col in (6, 7):
+                celda.font = FUENTE_TITULO
+                celda.number_format = FORMATO_IMPORTE
+                celda.alignment = ALINEACION_DERECHA
+        fila += 1
+
+    total_debe, total_haber = totales(asientos)
+    _escribir_fila(
+        hoja,
+        fila,
+        [
+            None,
+            None,
+            None,
+            "TOTAL GENERAL",
+            f"{len(asientos)} asiento(s)",
+            total_debe,
+            total_haber,
+        ],
+        formato_importe_idx={5, 6},
+    )
+    for col in range(1, 8):
+        celda = hoja.cell(row=fila, column=col)
+        celda.border = BORDE_CUADRO
+        if col in (4, 5, 6, 7):
+            celda.font = FUENTE_TITULO
+        if col in (6, 7):
+            celda.number_format = FORMATO_IMPORTE
+            celda.alignment = ALINEACION_DERECHA
+    fila += 1
+
+    diferencia = round(total_debe - total_haber, 2)
+    celda = hoja.cell(
+        row=fila,
+        column=4,
+        value=f"Diferencia (Debe - Haber): {diferencia:,.2f}".replace(",", "."),
+    )
+    celda.font = FUENTE_NORMAL
+
+
 def _armar_cuadro_subcategorias(
     hoja: Worksheet,
     fila_inicio: int,
@@ -829,6 +983,15 @@ def exportar(solicitud: SolicitudExportacion) -> bytes:
             fin_mov + FILA_SEPARACION_CUADRO,
             solicitud.pendientes_banco,
             f"Asientos sin coincidencia en el banco ({len(solicitud.pendientes_banco)})",
+        )
+
+        # Hoja propia con los asientos de ajuste de partida doble (con
+        # contracuenta) de las dos bandejas: es la que se carga en el sistema
+        # contable. Se arma siempre, tambien cuando no hay pendientes.
+        _armar_hoja_asientos(
+            libro,
+            solicitud.pendientes_banco,
+            solicitud.pendientes_xubio,
         )
 
         # Hoja extracto bruto si hay datos (opcional)

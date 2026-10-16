@@ -64,6 +64,17 @@ class Settings(BaseSettings):
     # archivo no existe, la exportacion sigue sin logo en vez de romperse.
     LOGO_EMPRESA: str = str(RAIZ_BACKEND / "app" / "assets" / "logos" / "logo.png")
 
+    # Cuentas contables que usa el generador de asientos de ajuste
+    # (asientos_ajuste.py) para las partidas que no encontraron coincidencia en
+    # el cruce. Son solo nombres de cuenta: el asiento no se registra en Xubio,
+    # se exporta en el papel de trabajo para que el contador lo cargue. Se
+    # pueden reescribir desde el .env sin tocar el codigo porque el plan de
+    # cuentas es de cada empresa.
+    CUENTA_BANCO: str = "Banco"
+    CUENTA_GASTOS_BANCARIOS: str = "Gastos bancarios"
+    CUENTA_CONCILIACION_BANCO: str = "Cuentas a conciliar - Banco"
+    CUENTA_CONCILIACION_MAYOR: str = "Cuentas a conciliar - Libro Mayor"
+
 
 # Instancia global para usar en toda la app
 settings = Settings()

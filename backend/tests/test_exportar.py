@@ -175,6 +175,27 @@ def test_el_ruta_esta_registrada_en_el_documento():
     assert "post" in esquema["paths"]["/api/exportar/conciliacion"]
 
 
+def test_el_endpoint_de_asientos_devuelve_la_partida_doble():
+    respuesta = client.post("/api/exportar/asientos", json=_payload())
+
+    assert respuesta.status_code == 200
+    datos = respuesta.json()
+    # El payload tiene un solo pendiente (COMISION): un asiento que balancea.
+    assert len(datos["asientos"]) == 1
+    asiento = datos["asientos"][0]
+    assert asiento["origen"] == "banco"
+    assert asiento["debe"] == asiento["haber"] == 150
+    cuentas = {linea["cuenta"] for linea in asiento["lineas"]}
+    assert "Comisiones" in cuentas
+    assert datos["total_debe"] == datos["total_haber"] == 150
+
+
+def test_el_endpoint_de_asientos_esta_registrado():
+    esquema = app.openapi()
+    assert "/api/exportar/asientos" in esquema["paths"]
+    assert "post" in esquema["paths"]["/api/exportar/asientos"]
+
+
 def test_el_nombre_del_archivo_llega_visible_al_frontend():
     # Content-Disposition no es un header "seguro" de CORS. El frontend corre
     # en otro origen (localhost:4200 contra 127.0.0.1:8000), asi que si el
